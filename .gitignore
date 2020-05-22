@@ -1,5 +1,5 @@
 fasterica.egg-info/
 **/__pycache__/**
-**/__pytest_cache__/**
+**/.pytest_cache/**
 **/.eggs/**
 

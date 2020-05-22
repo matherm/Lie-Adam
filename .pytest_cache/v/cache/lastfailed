@@ -1,4 +1,0 @@
-{
-  "tests/test_fasterica.py::test": true,
-  "tests/test_fasterica.py::test_whitening": true
-}
