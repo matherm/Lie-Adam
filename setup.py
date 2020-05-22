@@ -7,7 +7,7 @@ import subprocess, os, sys
 install_requires = ["numpy >= 1.5.0",
                     "scipy", 
                     "imageio", 
-                    "sklearn",
+                    "scikit-learn",
                     "torch"]
  
 setup_requires = ['pytest-runner', 'pytest', 'pytest-cov']
