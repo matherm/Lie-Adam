@@ -55,6 +55,7 @@ class FasterICA():
     """
     def __init__(self, n_components, whiten=True, loss="logcosh"):
 
+        self.device = "cpu"
         self.n_components = n_components
         self.whiten = whiten
         self.net = None
@@ -70,6 +71,16 @@ class FasterICA():
         input_dim = batch.shape[1]
         self.net = Net(input_dim, self.n_components, self.whiten)
         self.optim = Adam_Lie(self.net.parameters(), lr=1e-4)
+        self.net.to(self.device)
+
+    def cuda(self):
+        self.to("cuda")
+    
+    def cpu(self):
+        self.to("cpu")
+
+    def to(self, device):
+        self.device = device
     
     @property
     def unmixing_matrix(self, numpy=True):
@@ -103,9 +114,10 @@ class FasterICA():
         if validation_loader is None:
             validation_loader = dataloader
 
+
         def fit_epoch():
             for batch in dataloader:
-                data, label = batch[0], None
+                data, label = batch[0].to(self.device), None
                 
                 if self.net is None:
                     self.init(data)
@@ -120,11 +132,11 @@ class FasterICA():
             loss = 0.
             datalist = []
             for batch in validation_loader:
-                data, label = batch[0], None
+                data, label = batch[0].to(self.device), None
                 output = self.net(data)
                 loss += self.loss(output).sum(1).mean().detach()
                 datalist.append(data.detach())
-            datalist = torch.cat(datalist, dim=0)
+            datalist = torch.cat(datalist, dim=0).cpu()
             print(f"Eval: Validation loss (ica/white/kurt): {loss/len(validation_loader):.2f} / {Loss.FrobCov(datalist.numpy(), self.unmixing_matrix):.2f} / {Loss.Kurtosis(datalist.numpy(), self.unmixing_matrix):.2f}")
 
         for ep in range(epochs):
@@ -143,14 +155,20 @@ if __name__ == "__main__":
     X = X - X.mean()
     X = X / X.std()
 
-    print("Fitting data: ", X.shape)
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
     
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X_val).float())
     dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
 
-    ica = FasterICA(n_components=2)    
+    ica = FasterICA(n_components=10)    
+
+    device = "cpu"
+    if torch.cuda.is_available():
+        ica.cuda()
+        device = "cuda"
+
+    print("Fitting data: ", X.shape, "on", device)
     ica.fit(dataloader, 100, dataloader_valid)
 
 
