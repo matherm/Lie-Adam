@@ -7,8 +7,8 @@ import subprocess, os, sys
 install_requires = ["numpy >= 1.5.0",
                     "scipy", 
                     "imageio", 
-                    "sklearn"
-                     ]
+                    "sklearn",
+                    "torch"]
  
 setup_requires = ['pytest-runner', 'pytest', 'pytest-cov']
 
@@ -29,7 +29,7 @@ __version__ = read_version("fasterica/__version__.py")
 setup(
       name = 'fasterica',
       description= "IOS FasterICA",
-      author = 'Copyright (C) 2018 Matthias Hermann & Matthias O. Franz, IOS Konstanz',
+      author = 'Copyright (C) 2020 Matthias Hermann & Matthias O. Franz, IOS Konstanz',
       author_email = 'Matthias.Hermann@htwg-konstanz.de',
       version = __version__,
       install_requires=install_requires,
