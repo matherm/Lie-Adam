@@ -8,68 +8,38 @@ class Net(nn.Module):
 
     def __init__(self, n_input, n_components, whiten=True, dataset_size=-1):
         super().__init__()
-        
-        self.layer_whitening = Batch_PCA_Layer(n_input, n_components, dataset_size)
-        self.layer_ica = SO_Layer(n_components)
-        self.whiten = whiten
+        self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
+        self.ica    = SO_Layer(n_components)
+        if whiten:
+            self.layers = nn.Sequential(self.whiten, self.ica)
+        else:
+            self.layers = nn.Sequential(self.ica)
 
     def forward(self, X):
-        if self.whiten:
-            X = self.layer_whitening(X)
-        X = self.layer_ica(X)
-        return X
-
-class Loss():
-
-    @staticmethod
-    def logcosh(x, a1=1.2):
-        """is proportional negative log-likelihood
-        """
-        # inverse soft hat
-        ax = a1*x
-        if ax.max() > 80 or ax.min() < -80:
-            warnings.warn(f"Exceeding range of cosh(). Maybe decrease a1: ({a1})")
-            ax = torch.clamp(ax, -80, 80)
-        return -(-torch.log( torch.cosh( ax ) + 1e-5 )/a1)
-
-    @staticmethod
-    def exp(x, a2=0.99):
-        """is proportional negative log-likelihood
-        """
-        # hat
-        return -(torch.exp(-a2/2*x**2)/a2)
-
-    @staticmethod
-    def FrobCov(X, W):
-        return np.linalg.norm(np.cov((X @ W).T) - np.eye(W.shape[1])) / W.shape[1]
-
-    @staticmethod
-    def Kurtosis(X, W):
-        return scipy.stats.kurtosis(X @ W).mean()
-    
+        return self.layers(X)
 
 class FasterICA():
 
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="exp"):
+    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=1.0):
 
         self.device = "cpu"
+        self.optimistic_whitening_rate = optimistic_whitening_rate
         self.n_components = n_components
         self.whiten = whiten
         self.net = None
 
         if loss == "logcosh":
-            self.loss = Loss.logcosh
+            self.loss = Loss.Logcosh
         elif loss == "exp":
-            self.loss = Loss.exp
+            self.loss = Loss.Exp
         else:
             raise ValueError(f"loss={loss} not understood.")
 
-    def init(self, batch, dataset_size, lr=1e-3):
-        input_dim = batch.shape[1]
-        self.net = Net(input_dim, self.n_components, self.whiten, dataset_size)
+    def reset(self, input_dim, dataset_size, lr=1e-3):
+        self.net = Net(input_dim, self.n_components, self.whiten, int(dataset_size * self.optimistic_whitening_rate))
         self.optim = Adam_Lie(self.net.parameters(), lr=lr)
         self.net.to(self.device)
 
@@ -84,11 +54,9 @@ class FasterICA():
     
     @property
     def unmixing_matrix(self, numpy=True):
-        W_white = self.net.layer_whitening.weight.T / torch.sqrt(self.net.layer_whitening.bias)
-        W_rot = self.net.layer_ica.weight.T 
-        if numpy:
-            return (W_white @ W_rot).cpu().detach().numpy()
-        return (W_white @ W_rot).cpu().detach()
+        W_white = self.net.whiten.weight.T / torch.sqrt(self.net.whiten.bias)
+        W_rot = self.net.ica.weight.T 
+        return (W_white @ W_rot).cpu().detach().numpy()
     
     @property
     def mixing_matrix(self):
@@ -96,13 +64,16 @@ class FasterICA():
 
     @property
     def components_(self):
-        W_white = self.net.layer_whitening.weight.T / torch.sqrt(self.net.layer_whitening.bias)
-        return self.net.layer_ica.weight.T.detach().cpu().numpy()
+        return self.net.ica.weight.T.detach().cpu().numpy()
+
+    @property
+    def sphering_matrix(self, numpy=True):
+        W_white = self.net.whiten.weight.T / torch.sqrt(self.net.whiten.bias)
+        return (W_white @ W_rot).cpu().detach().numpy()
 
     @property
     def explained_variance_(self):
-        return self.net.layer_whitening.bias.detach().cpu().numpy()
-
+        return self.net.whiten.bias.detach().cpu().numpy()
 
     def transform(X):
         if not torch.is_tensor(X):
@@ -110,19 +81,24 @@ class FasterICA():
         return self.net(X).detach()
 
     def fit(self, dataloader, epochs=10, validation_loader=None, lr=1e-3):
-
-        dataset_size = len(dataloader) * dataloader.batch_size
+        
+        if isinstance(dataloader, np.ndarray):
+            dataloader = FastTensorDataLoader((torch.from_numpy(dataloader).float(),torch.empty(len(dataloader))))
+        if torch.is_tensor(dataloader):
+            dataloader = FastTensorDataLoader((dataloader.float(), torch.empty(len(dataloader))))
 
         if validation_loader is None:
             validation_loader = dataloader
 
+        dataset_size = len(dataloader) * dataloader.batch_size
+        
         def fit_epoch():
             for batch in dataloader:
                 data, label = batch[0].to(self.device), None
                 
-                if self.net is None:
-                    self.init(data, dataset_size, lr)
-
+                if self.net is None: 
+                    self.reset(data.shape[1], dataset_size, lr)
+                
                 self.optim.zero_grad()
                 output = self.net(data)
                 loss = self.loss(output).sum(1).mean()
