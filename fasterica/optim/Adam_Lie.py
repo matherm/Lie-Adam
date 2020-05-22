@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from scipy.stats import ortho_group
 import math
 
 from ..helpers import *

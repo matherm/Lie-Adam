@@ -6,7 +6,7 @@
 1. For GIT:
 ```
 git clone git@git.ios.htwg-konstanz.de:mof-applications/fasterica.git
-python setup install
+python setup.py install|develop
 ```
 
 2. For PIP
