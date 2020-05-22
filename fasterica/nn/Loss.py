@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import scipy
+from ..helpers.mutual_information import mutual_information
 
 class Loss():
 
@@ -23,9 +24,13 @@ class Loss():
         return -(torch.exp(-a2/2*x**2)/a2)
 
     @staticmethod
-    def FrobCov(X, W):
-        return np.linalg.norm(np.cov((X @ W).T) - np.eye(W.shape[1])) / W.shape[1]
+    def FrobCov(S):
+        return np.linalg.norm(np.cov((S).T) - np.eye(S.shape[1])) / S.shape[1]
 
     @staticmethod
-    def Kurtosis(X, W):
-        return scipy.stats.kurtosis(X @ W).mean()
+    def Kurtosis(S):
+        return scipy.stats.kurtosis(S).mean()
+
+    @staticmethod
+    def MI(S):
+        return mutual_information(S)

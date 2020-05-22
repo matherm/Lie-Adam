@@ -18,7 +18,7 @@ def test_whitening_cpu():
 
     print("Fitting data: ", X.shape, "on", device)
     ica.fit(dataloader, 1)
-    assert Loss.FrobCov(X, ica.unmixing_matrix) < 0.09
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 
 def test_whitening_cuda():
@@ -39,7 +39,7 @@ def test_whitening_cuda():
 
     print("Fitting data: ", X.shape, "on", device)
     ica.fit(dataloader, 1)
-    assert Loss.FrobCov(X, ica.unmixing_matrix) < 0.09
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_tensor():
     X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
@@ -55,7 +55,7 @@ def test_whitening_tensor():
 
     print("Fitting data: ", X.shape, "on", device)
     ica.fit(X, 1)
-    assert Loss.FrobCov(X, ica.unmixing_matrix) < 0.09
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_tensor_optimistic():
     X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
@@ -71,7 +71,7 @@ def test_whitening_tensor_optimistic():
 
     print("Fitting data: ", X.shape, "on", device)
     ica.fit(X, 1)
-    assert Loss.FrobCov(X, ica.unmixing_matrix) < 0.09
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@ class FasterICA():
 
         dataset_size = len(dataloader) * dataloader.batch_size
         
-        def fit_epoch():
+        def fit(ep):
             for batch in dataloader:
                 data, label = batch[0].to(self.device), None
                 
@@ -105,7 +105,7 @@ class FasterICA():
                 loss.backward()
                 self.optim.step()
 
-        def evaluate():
+        def evaluate(ep):
             loss = 0.
             datalist = []
             for batch in validation_loader:
@@ -113,11 +113,11 @@ class FasterICA():
                 output = self.net(data)
                 loss += self.loss(output).sum(1).mean().detach()
                 datalist.append(data.detach())
-            datalist = torch.cat(datalist, dim=0).cpu()
-            print(f"Eval: Validation loss (ica/white/kurt): {loss/len(validation_loader):.2f} / {Loss.FrobCov(datalist.numpy(), self.unmixing_matrix):.2f} / {Loss.Kurtosis(datalist.numpy(), self.unmixing_matrix):.2f}")
+            S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
+            print(f"Eval ep.{ep:3} - validation (loss/white/kurt/mi): {loss/len(validation_loader):.2f} / {Loss.FrobCov(S):.2f} / {Loss.Kurtosis(S):.2f} / {Loss.MI(S):.2f}")
 
         for ep in range(epochs):
-            fit_epoch()
-            evaluate()
+            fit(ep)
+            evaluate(ep)
 
         return self
