@@ -1,0 +1,156 @@
+import torch, warnings
+import torch.nn as nn
+import numpy as np
+import scipy
+from fasterica import *
+
+class Net(nn.Module):
+
+    def __init__(self, n_input, n_components, whiten=True):
+        super().__init__()
+        
+        self.layer_whitening = Incr_Batch_Layer(n_input, n_components)
+        self.layer_ica = SO_Layer(n_components)
+        self.whiten = whiten
+
+    def forward(self, X):
+        if self.whiten:
+            X = self.layer_whitening(X)
+        X = self.layer_ica(X)
+        return X
+
+class Loss():
+
+    @staticmethod
+    def logcosh(x, a1=1.2):
+        """is proportional negative log-likelihood
+        """
+        # inverse soft hat
+        ax = a1*x
+        if ax.max() > 80 or ax.min() < -80:
+            warnings.warn(f"Exceeding range of cosh(). Maybe decrease a1: ({a1})")
+            ax = torch.clamp(ax, -80, 80)
+        return -(-torch.log( torch.cosh( ax ) + 1e-5 )/a1)
+
+    @staticmethod
+    def exp(x, a2=0.99):
+        """is proportional negative log-likelihood
+        """
+        # hat
+        return -(torch.exp(-a2/2*x**2)/a2)
+
+    @staticmethod
+    def FrobCov(X, W):
+        return np.linalg.norm(np.cov((X @ W).T) - np.eye(W.shape[1])) / W.shape[1]
+
+    @staticmethod
+    def Kurtosis(X, W):
+        return scipy.stats.kurtosis(X @ W).mean()
+    
+
+class FasterICA():
+
+    """
+    tbd.
+    """
+    def __init__(self, n_components, whiten=True, loss="logcosh"):
+
+        self.n_components = n_components
+        self.whiten = whiten
+        self.net = None
+
+        if loss == "logcosh":
+            self.loss = Loss.logcosh
+        elif loss == "exp":
+            self.loss = Loss.exp
+        else:
+            raise ValueError(f"loss={loss} not understood.")
+
+    def init(self, batch):
+        input_dim = batch.shape[1]
+        self.net = Net(input_dim, self.n_components, self.whiten)
+        self.optim = Adam_Lie(self.net.parameters(), lr=1e-4)
+    
+    @property
+    def unmixing_matrix(self, numpy=True):
+        W_white = self.net.layer_whitening.weight.T / torch.sqrt(self.net.layer_whitening.bias)
+        W_rot = self.net.layer_ica.weight.T 
+        if numpy:
+            return (W_white @ W_rot).cpu().detach().numpy()
+        return (W_white @ W_rot).cpu().detach()
+    
+    @property
+    def mixing_matrix(self):
+        return np.linalg.pinv(self.mixing_matrix)
+
+    @property
+    def components_(self):
+        W_white = self.net.layer_whitening.weight.T / torch.sqrt(self.net.layer_whitening.bias)
+        return self.net.layer_ica.weight.T.detach().cpu().numpy()
+
+    @property
+    def explained_variance_(self):
+        return self.net.layer_whitening.bias.detach().cpu().numpy()
+
+
+    def transform(X):
+        if not torch.is_tensor(X):
+            return self.transform(torch.from_numpy(X)).cpu().numpy()
+        return self.net(X).detach()
+
+    def fit(self, dataloader, epochs=10, validation_loader=None):
+        
+        if validation_loader is None:
+            validation_loader = dataloader
+
+        def fit_epoch():
+            for batch in dataloader:
+                data, label = batch[0], None
+                
+                if self.net is None:
+                    self.init(data)
+
+                self.optim.zero_grad()
+                output = self.net(data)
+                loss = self.loss(output).sum(1).mean()
+                loss.backward()
+                self.optim.step()
+
+        def evaluate():
+            loss = 0.
+            datalist = []
+            for batch in validation_loader:
+                data, label = batch[0], None
+                output = self.net(data)
+                loss += self.loss(output).sum(1).mean().detach()
+                datalist.append(data.detach())
+            datalist = torch.cat(datalist, dim=0)
+            print(f"Eval: Validation loss (ica/white/kurt): {loss/len(validation_loader):.2f} / {Loss.FrobCov(datalist.numpy(), self.unmixing_matrix):.2f} / {Loss.Kurtosis(datalist.numpy(), self.unmixing_matrix):.2f}")
+
+        for ep in range(epochs):
+            fit_epoch()
+            evaluate()
+
+        return self
+
+if __name__ == "__main__":
+
+    from sklearn.datasets import make_moons, load_digits
+    X = np.hstack([make_moons(n_samples=2000)[0] for d in range(100)])
+    X_val = np.hstack([make_moons(n_samples=500)[0] for d in range(100)])
+    X_val = X - X.mean()
+    X_val = X / X.std()
+    X = X - X.mean()
+    X = X / X.std()
+
+    print("Fitting data: ", X.shape)
+    dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+    
+    dataset = torch.utils.data.TensorDataset(torch.from_numpy(X_val).float())
+    dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+
+    ica = FasterICA(n_components=2)    
+    ica.fit(dataloader, 100, dataloader_valid)
+
+

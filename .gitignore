@@ -1,0 +1,3 @@
+fasterica.egg-info/
+**/pycache/**
+**/.eggs/**
