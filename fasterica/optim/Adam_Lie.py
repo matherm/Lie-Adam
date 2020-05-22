@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-from scipy.stats import ortho_group
 import math
-from .expm import *
 
+from .expm import *
 from ..nn import NoGDParameter, SOParameter
 
 def isnan(x):
