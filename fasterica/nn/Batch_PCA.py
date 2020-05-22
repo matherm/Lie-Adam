@@ -83,14 +83,8 @@ class F_Batch_PCA(Function):
                 inpt = torch.cat([S.view((-1, 1)) * weight, inpt, mean_correction], dim=0)
 
             # Update
-            # We need to swith to numpy as torch-svd is really inaccurate in v.0.4.2
-            #U, S, V = torch.svd(inpt, some=False) 
-            #U, S, V = U.cuda().float(), S.cuda().float(), V.cuda().float()
-            device = inpt.device
-            U, S, V = np.linalg.svd(inpt.cpu().numpy(), full_matrices=False)
-            U, S, V = torch.from_numpy(U).to(device),torch.from_numpy(S).to(device), torch.from_numpy(V).to(device)
-
-            U, V =  F_Batch_PCA.svd_flip(U, V)
+            U, S, V = torch.svd(inpt, some=False) # svd returns V instead of numpy-ish V.T
+            U, V =  F_Batch_PCA.svd_flip(U, V.T)
             explained_variance = S ** 2 / (n_total_samples - 1) 
     
             ups_ds_size.data[0] = n_total_samples
