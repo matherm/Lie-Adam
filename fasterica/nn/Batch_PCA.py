@@ -6,7 +6,7 @@ import numpy as np
 
 from ..nn import NoGDParameter
 
-class F_Batch_Incr(Function):
+class F_Batch_PCA(Function):
     """
     https://github.com/scikit-learn/scikit-learn/blob/483cd3eaa/sklearn/decomposition/_incremental_pca.py
     """
@@ -70,7 +70,7 @@ class F_Batch_Incr(Function):
 
         if n_samples_seen_ <= ds_size and updating > 0.:
 
-            col_mean, col_var, n_total_samples =  F_Batch_Incr._incremental_mean_and_var(
+            col_mean, col_var, n_total_samples =  F_Batch_PCA._incremental_mean_and_var(
                                                                 inpt, last_mean=mean_, last_variance=var_,
                                                                 last_sample_count=n_samples_seen_)
             # Build matrix of combined previous basis and new data
@@ -90,7 +90,7 @@ class F_Batch_Incr(Function):
             U, S, V = np.linalg.svd(inpt.cpu().numpy(), full_matrices=False)
             U, S, V = torch.from_numpy(U).to(device),torch.from_numpy(S).to(device), torch.from_numpy(V).to(device)
 
-            U, V =  F_Batch_Incr.svd_flip(U, V)
+            U, V =  F_Batch_PCA.svd_flip(U, V)
             explained_variance = S ** 2 / (n_total_samples - 1) 
     
             ups_ds_size.data[0] = n_total_samples
@@ -103,7 +103,7 @@ class F_Batch_Incr(Function):
         else:
             return grad_input, weight.clone(), S.clone(), explained_var.clone(), mean_.clone(), var_.clone(), None, None
   
-class Incr_Batch_Layer(nn.Module):
+class Batch_PCA_Layer(nn.Module):
 
     def __init__(self, n_in, n_out, ds_size=2, updating=True):
         super().__init__()
@@ -123,4 +123,4 @@ class Incr_Batch_Layer(nn.Module):
         self.ups_ds_size.data[1] = ds_size
 
     def forward(self, X):
-        return F_Batch_Incr.apply(X, self.weight, self.S, self.bias, self.mean_, self.var_, self.ups_ds_size, self.updating)
+        return F_Batch_PCA.apply(X, self.weight, self.S, self.bias, self.mean_, self.var_, self.ups_ds_size, self.updating)

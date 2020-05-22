@@ -9,7 +9,7 @@ class Net(nn.Module):
     def __init__(self, n_input, n_components, whiten=True, dataset_size=-1):
         super().__init__()
         
-        self.layer_whitening = Incr_Batch_Layer(n_input, n_components, dataset_size)
+        self.layer_whitening = Batch_PCA_Layer(n_input, n_components, dataset_size)
         self.layer_ica = SO_Layer(n_components)
         self.whiten = whiten
 
