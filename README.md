@@ -1,12 +1,13 @@
 # FasterICA
 
 
-### Installation (GIT)
+### Installation
+
+1. GIT
 >> git clone git@git.ios.htwg-konstanz.de:mof-applications/fasterica.git
 >> python setup install
 
-
-### Installation (PIP)
+2. PIP
 >> pip install git+https://git.ios.htwg-konstanz.de/mof-applications/fasterica.git
 
 
