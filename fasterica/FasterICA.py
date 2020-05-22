@@ -146,8 +146,8 @@ class FasterICA():
 
         return self
 
-if __name__ == "__main__":
 
+def test():
     from sklearn.datasets import make_moons, load_digits
     X = np.hstack([make_moons(n_samples=2000)[0] for d in range(100)])
     X_val = np.hstack([make_moons(n_samples=500)[0] for d in range(100)])
@@ -171,5 +171,11 @@ if __name__ == "__main__":
 
     print("Fitting data: ", X.shape, "on", device)
     ica.fit(dataloader, 100, dataloader_valid)
+
+
+if __name__ == "__main__":
+
+    test()
+
 
 
