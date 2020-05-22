@@ -68,7 +68,7 @@ class F_Batch_Incr(Function):
         if n_components_ > len(inpt):
             raise ValueError(f"n_components={n_components_} must be less or equal to the batch number of samples {len(inpt)}")
 
-        if True and updating > 0.: # n_samples_seen_ < ds_size:
+        if n_samples_seen_ <= ds_size and updating > 0.:
 
             col_mean, col_var, n_total_samples =  F_Batch_Incr._incremental_mean_and_var(
                                                                 inpt, last_mean=mean_, last_variance=var_,

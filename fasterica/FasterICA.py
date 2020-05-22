@@ -6,10 +6,10 @@ from fasterica import *
 
 class Net(nn.Module):
 
-    def __init__(self, n_input, n_components, whiten=True):
+    def __init__(self, n_input, n_components, whiten=True, dataset_size=-1):
         super().__init__()
         
-        self.layer_whitening = Incr_Batch_Layer(n_input, n_components)
+        self.layer_whitening = Incr_Batch_Layer(n_input, n_components, dataset_size)
         self.layer_ica = SO_Layer(n_components)
         self.whiten = whiten
 
@@ -53,7 +53,7 @@ class FasterICA():
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="logcosh"):
+    def __init__(self, n_components, whiten=True, loss="exp"):
 
         self.device = "cpu"
         self.n_components = n_components
@@ -67,10 +67,10 @@ class FasterICA():
         else:
             raise ValueError(f"loss={loss} not understood.")
 
-    def init(self, batch):
+    def init(self, batch, dataset_size, lr=1e-3):
         input_dim = batch.shape[1]
-        self.net = Net(input_dim, self.n_components, self.whiten)
-        self.optim = Adam_Lie(self.net.parameters(), lr=1e-4)
+        self.net = Net(input_dim, self.n_components, self.whiten, dataset_size)
+        self.optim = Adam_Lie(self.net.parameters(), lr=lr)
         self.net.to(self.device)
 
     def cuda(self):
@@ -109,18 +109,19 @@ class FasterICA():
             return self.transform(torch.from_numpy(X)).cpu().numpy()
         return self.net(X).detach()
 
-    def fit(self, dataloader, epochs=10, validation_loader=None):
-        
+    def fit(self, dataloader, epochs=10, validation_loader=None, lr=1e-3):
+
+        dataset_size = len(dataloader) * dataloader.batch_size
+
         if validation_loader is None:
             validation_loader = dataloader
-
 
         def fit_epoch():
             for batch in dataloader:
                 data, label = batch[0].to(self.device), None
                 
                 if self.net is None:
-                    self.init(data)
+                    self.init(data, dataset_size, lr)
 
                 self.optim.zero_grad()
                 output = self.net(data)
