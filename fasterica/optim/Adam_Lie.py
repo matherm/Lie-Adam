@@ -4,15 +4,7 @@ from scipy.stats import ortho_group
 import math
 from .expm import *
 
-class NoGDParameter(nn.Parameter):
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}()"
-
-class SOParameter(nn.Parameter):
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}()"
+from ..nn import NoGDParameter, SOParameter
 
 def isnan(x):
     return (x != x).sum() > 0

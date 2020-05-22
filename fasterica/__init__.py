@@ -1,4 +1,4 @@
 from .helpers import *
-from .whitening import *
-from .lie_optim import *
+from .optim import *
+from .nn import *
 from .FasterICA import *

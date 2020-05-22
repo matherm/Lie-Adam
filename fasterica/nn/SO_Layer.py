@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 from torch.nn.parameter import Parameter
 
-from .Adam_Lie import *
+from .SO_Parameter import *
 
 def isnan(x):
     return (x != x).sum() > 0

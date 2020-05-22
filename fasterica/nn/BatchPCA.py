@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 import numpy as np
 
-from ..lie_optim import *
+from ..nn import NoGDParameter
 
 class F_Batch_Incr(Function):
     """
