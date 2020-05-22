@@ -16,12 +16,11 @@ pip install git+https://git.ios.htwg-konstanz.de/mof-applications/fasterica.git
 
 ### Run example
 ´´´
-python fasterica/FasterICA.py 
+python examples/sklearn_digits.py  
 ´´´
 
-or
+### Run tests
 
 ```
-from fasterica import test
-test()
+pytest tests
 ```

@@ -1,0 +1,4 @@
+[
+  "tests/test_fasterica.py::test_whitening_cpu",
+  "tests/test_fasterica.py::test_whitening_cuda"
+]
