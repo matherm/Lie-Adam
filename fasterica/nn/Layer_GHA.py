@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.autograd import Function
 
 from ..helpers import *
-from .Variance_Layer import OnlineVariance
+from .Layer_Variance import OnlineVariance
 from .Parameter import *
 
 EPS = 1e-7

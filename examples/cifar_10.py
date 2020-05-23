@@ -17,10 +17,14 @@ X_val = X / X.std()
 X = X - X.mean()
 X = X / X.std()
 
-ica = FasterICA(n_components=100)    
-
+ica = FasterICA(n_components=100, whitening_strategy="GHA")    
 print("Fitting data shape", X.shape, "on", ica.device)
 ica.fit(X, 10, X_val)
-
 show_filters_color( ica.mixing_matrix.T)
-plt.savefig("./cifar10-components.png")
+plt.savefig("./cifar10-components-gha.png")
+
+ica = FasterICA(n_components=100, whitening_strategy="batch")    
+print("Fitting data shape", X.shape, "on", ica.device)
+ica.fit(X, 10, X_val)
+show_filters_color( ica.mixing_matrix.T)
+plt.savefig("./cifar10-components-batch.png")
