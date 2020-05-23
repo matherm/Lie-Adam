@@ -41,6 +41,7 @@ class FasterICA():
         self.whiten = whiten
         self.whitening_strategy = whitening_strategy
         self.net = None
+        self.history = []
 
         if loss == "logcosh":
             self.loss = Loss.Logcosh
@@ -153,10 +154,12 @@ class FasterICA():
                 loss += self.loss(output).sum(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
-            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss/len(validation_loader):.2f} / {Loss.FrobCov(S):.2f} / {Loss.Kurtosis(S):.2f} (eval took: {time.time() - t0:.1f}s)")
+            loss = loss/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
+            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss[0]:.2f} / {loss[1]:.2f} / {loss[2]:.2f} (eval took: {time.time() - t0:.1f}s)")
+            self.history.append(loss)
 
         for ep in range(epochs):
             fit(ep)
             evaluate(ep)
 
-        return self
+        return self.history
