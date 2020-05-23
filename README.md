@@ -2,7 +2,7 @@
 
 PyTorch implementation of FasterICA. 
 
-![](./cifar10-components.png)
+![](./examples/cifar10-components.png)
 
 Implements the following algorithms:
 - Batch PCA with optimistic whitening
