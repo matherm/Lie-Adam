@@ -2,6 +2,8 @@
 
 PyTorch implementation of FasterICA. 
 
+![](./cifar10-components.png)
+
 Implements the following algorithms:
 - Batch PCA with optimistic whitening
     - D. Ross, J. Lim, R. Lin, M. Yang, Incremental Learning for Robust Visual 

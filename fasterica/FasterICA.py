@@ -1,7 +1,8 @@
-import torch, warnings
+import torch, warnings, time, sys
 import torch.nn as nn
 import numpy as np
 import scipy
+from tqdm import tqdm
 from fasterica import *
 
 class Net(nn.Module):
@@ -65,7 +66,7 @@ class FasterICA():
     
     @property
     def mixing_matrix(self):
-        return np.linalg.pinv(self.mixing_matrix)
+        return np.linalg.pinv(self.unmixing_matrix)
 
     @property
     def components_(self):
@@ -106,13 +107,17 @@ class FasterICA():
 
         return dataloader, validation_loader
 
-    def fit(self, dataloader, epochs=10, validation_loader=None, lr=1e-3):
+    def fit(self, X, epochs=10, X_val=None, lr=1e-3):
 
-        dataloader, validation_loader = self._prepare_input(dataloader, validation_loader)
+        dataloader, validation_loader = self._prepare_input(X, X_val)
         dataset_size = len(dataloader) * dataloader.batch_size
         
         def fit(ep):
-            for batch in dataloader:
+            if ep == 0:
+                iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
+            else:
+                iterator = zip(dataloader, range(len(dataloader)))
+            for batch, _ in iterator:
                 data, label = batch[0].to(self.device), None
                 
                 if self.net is None: 
@@ -127,13 +132,14 @@ class FasterICA():
         def evaluate(ep):
             loss = 0.
             datalist = []
+            t0 = time.time()
             for batch in validation_loader:
                 data, label = batch[0].to(self.device), None
                 output = self.net(data)
                 loss += self.loss(output).sum(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
-            print(f"Eval ep.{ep:3} - validation (loss/white/kurt/mi): {loss/len(validation_loader):.2f} / {Loss.FrobCov(S):.2f} / {Loss.Kurtosis(S):.2f} / {Loss.MI(S):.2f}")
+            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss/len(validation_loader):.2f} / {Loss.FrobCov(S):.2f} / {Loss.Kurtosis(S):.2f} (eval took: {time.time() - t0:.1f}s)")
 
         for ep in range(epochs):
             fit(ep)
