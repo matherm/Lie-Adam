@@ -111,6 +111,10 @@ class Batch_PCA_Layer(nn.Module):
         self.ups_ds_size = torch.from_numpy(np.asarray([0., ds_size])).float()
         self.n_components = n_out
         self.updating = torch.ones(1) if updating else torch.zeros(1)
+
+    @property
+    def sphering_matrix(self):
+        return self.weight.T / torch.sqrt(self.bias)
     
     def compute_updates(self, updating=True, ds_size=2):
         self.updating = torch.ones(1) if updating else torch.zeros(1)

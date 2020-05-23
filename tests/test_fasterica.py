@@ -1,85 +1,62 @@
 from fasterica import *
 from sklearn.datasets import make_moons, load_digits
 
-def test_whitening_cpu():
-    X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
+def nice_assert_st(A, B):
+    if not A < B:
+        raise AssertionError(f"Was {A}. Exepted {A} < {B}")
 
+X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
+X = X - X.mean()
+X = X / X.std()
+
+def test_whitening_cpu():
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
     
     ica = FasterICA(n_components=2, optimistic_whitening_rate=1.0)    
     ica.cpu()
 
-    print("Fitting data: ", X.shape, "on", ica.device)
     ica.fit(dataloader, 1)
-    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
+    nice_assert_st(Loss.FrobCov(X @ ica.unmixing_matrix) , 0.09)
 
 
 def test_whitening_cuda():
-    X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
-
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
     
     ica = FasterICA(n_components=2, optimistic_whitening_rate=1.0)    
     ica.cuda()
 
-    print("Fitting data: ", X.shape, "on", ica.device)
     ica.fit(dataloader, 1)
     assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_numpy():
-    X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
-
     ica = FasterICA(n_components=2, optimistic_whitening_rate=1.0)    
-    print("Fitting data: ", X.shape, "on", ica.device)
-
     ica.fit(X, 1)
     assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_dataloader():
-    X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
-
     ica = FasterICA(n_components=2, optimistic_whitening_rate=1.0)    
-    print("Fitting data: ", X.shape, "on", ica.device)
-
-    X = torch.from_numpy(X).float()
-    dl = FastTensorDataLoader((X,torch.empty(len(X))), batch_size=len(X))
+    X_ = torch.from_numpy(X).float()
+    dl = FastTensorDataLoader((X_,torch.empty(len(X))), batch_size=len(X))
     ica.fit(dl, 1)
-    assert Loss.FrobCov(X.numpy() @ ica.unmixing_matrix) < 0.09
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_tensor():
-    return True
-    X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
-
     ica = FasterICA(n_components=2, optimistic_whitening_rate=1.0)    
-    print("Fitting data: ", X.shape, "on", ica.device)
-
-    X = torch.from_numpy(X)
-    ica.fit(X, 1)
-    assert Loss.FrobCov(X.numpy() @ ica.unmixing_matrix) < 0.09
+    X_ = torch.from_numpy(X)
+    ica.fit(X_, 1)
+    assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
 def test_whitening_tensor_optimistic():
-    X = np.hstack([make_moons(n_samples=1000)[0] for d in range(100)])
-    X = X - X.mean()
-    X = X / X.std()
-
-    ica = FasterICA(n_components=2, optimistic_whitening_rate=0.75)    
-
-    print("Fitting data: ", X.shape, "on", ica.device)
+    ica = FasterICA(n_components=2, optimistic_whitening_rate=0.9)    
     ica.fit(X, 1)
     assert Loss.FrobCov(X @ ica.unmixing_matrix) < 0.09
 
+def test_whitening_tensor_gha():
+    ica = FasterICA(n_components=2,  optimistic_whitening_rate=1.0, whitening_strategy="GHA")    
+    ica.fit(X, 2)
+    nice_assert_st(Loss.FrobCov(X @ ica.unmixing_matrix), 1)
 
 if __name__ == "__main__":
 

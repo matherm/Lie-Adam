@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 from torch.nn.parameter import Parameter
 
-from .SO_Parameter import *
+from .Parameter import *
 
 def isnan(x):
     return (x != x).sum() > 0
@@ -39,6 +39,10 @@ class SO_Layer(nn.Module):
     def __init__(self, n_dims):
         super().__init__()
         self.weight = SOParameter(torch.eye(n_dims))
+
+    @property
+    def components_(self):
+        return self.weight
 
     def forward(self, X):
         return F_SO_Linear().apply(X, self.weight)

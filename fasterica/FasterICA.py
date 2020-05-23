@@ -7,9 +7,12 @@ from fasterica import *
 
 class Net(nn.Module):
 
-    def __init__(self, n_input, n_components, whiten=True, dataset_size=-1):
+    def __init__(self, n_input, n_components, whiten=True, whitening_strategy="batch", dataset_size=-1):
         super().__init__()
-        self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
+        if whitening_strategy == "batch":
+            self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
+        if whitening_strategy == "GHA":
+            self.whiten = HebbianLayer(n_input, n_components, dataset_size)
         self.ica    = SO_Layer(n_components)
         if whiten:
             self.layers = nn.Sequential(self.whiten, self.ica)
@@ -24,12 +27,19 @@ class FasterICA():
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5):
+    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5, whitening_strategy="batch"):
+
+        if whitening_strategy not in ["GHA", "batch"]:
+            raise ValueError(f"Whitening strategy {whitening_strategy} not understood.")
+
+        if whitening_strategy == "GHA":
+            optimistic_whitening_rate = 1.0
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.n_components = n_components
         self.optimistic_whitening_rate = optimistic_whitening_rate
         self.whiten = whiten
+        self.whitening_strategy = whitening_strategy
         self.net = None
 
         if loss == "logcosh":
@@ -40,8 +50,9 @@ class FasterICA():
             raise ValueError(f"loss={loss} not understood.")
 
     def reset(self, input_dim, dataset_size, lr=1e-3):
-        self.net = Net(input_dim, self.n_components, self.whiten, int(dataset_size * self.optimistic_whitening_rate))
-        self.optim = Adam_Lie(self.net.parameters(), lr=lr)
+        self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
+        self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
+                               {'params': self.net.ica.parameters()}], lr=lr)
         self.net.to(self.device)
 
     def cuda(self):
@@ -60,8 +71,8 @@ class FasterICA():
     
     @property
     def unmixing_matrix(self, numpy=True):
-        W_white = self.net.whiten.weight.T / torch.sqrt(self.net.whiten.bias)
-        W_rot = self.net.ica.weight.T 
+        W_white = self.net.whiten.sphering_matrix 
+        W_rot = self.net.ica.components_.T 
         return (W_white @ W_rot).cpu().detach().numpy()
     
     @property
@@ -70,7 +81,7 @@ class FasterICA():
 
     @property
     def components_(self):
-        return self.net.ica.weight.T.detach().cpu().numpy()
+        return self.net.ica.components_.detach().cpu().numpy()
 
     @property
     def sphering_matrix(self, numpy=True):
@@ -128,6 +139,9 @@ class FasterICA():
                 loss = self.loss(output).sum(1).mean()
                 loss.backward()
                 self.optim.step()
+            
+            if isinstance(self.net.whiten, HebbianLayer):
+                self.net.whiten.step(ep, lr, self.optim.param_groups[0])
 
         def evaluate(ep):
             loss = 0.

@@ -17,7 +17,7 @@ X_val = X / X.std()
 X = X - X.mean()
 X = X / X.std()
 
-ica = FasterICA(n_components=100, optimistic_whitening_rate=0.2)    
+ica = FasterICA(n_components=100)    
 
 print("Fitting data shape", X.shape, "on", ica.device)
 ica.fit(X, 10, X_val)
