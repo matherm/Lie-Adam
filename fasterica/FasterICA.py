@@ -85,12 +85,12 @@ class FasterICA():
 
     @property
     def sphering_matrix(self, numpy=True):
-        W_white = self.net.whiten.weight.T / torch.sqrt(self.net.whiten.bias)
-        return (W_white @ W_rot).cpu().detach().numpy()
+        W_white = self.net.whiten.sphering_matrix 
+        return W_white.cpu().detach().numpy()
 
     @property
     def explained_variance_(self):
-        return self.net.whiten.bias.detach().cpu().numpy()
+        return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
     def transform(X):
         if not torch.is_tensor(X):

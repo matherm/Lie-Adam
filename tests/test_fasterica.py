@@ -58,6 +58,24 @@ def test_whitening_tensor_gha():
     ica.fit(X, 2)
     nice_assert_st(Loss.FrobCov(X @ ica.unmixing_matrix), 1)
 
+def test_properties_gha():
+    ica = FasterICA(n_components=2,  optimistic_whitening_rate=1.0, whitening_strategy="GHA")    
+    ica.fit(X, 1)
+    ica.unmixing_matrix
+    ica.mixing_matrix
+    ica.components_
+    ica.sphering_matrix
+    ica.explained_variance_
+
+def test_properties_batch():
+    ica = FasterICA(n_components=2,  optimistic_whitening_rate=1.0, whitening_strategy="batch")    
+    ica.fit(X, 1)
+    ica.unmixing_matrix
+    ica.mixing_matrix
+    ica.components_
+    ica.sphering_matrix
+    ica.explained_variance_
+
 if __name__ == "__main__":
 
     test_whitening_cpu()

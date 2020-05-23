@@ -114,7 +114,11 @@ class Batch_PCA_Layer(nn.Module):
 
     @property
     def sphering_matrix(self):
-        return self.weight.T / torch.sqrt(self.bias)
+        return self.weight.T.detach() / torch.sqrt(self.bias).detach()
+
+    @property
+    def explained_variance_(self):
+        return self.bias.detach()
     
     def compute_updates(self, updating=True, ds_size=2):
         self.updating = torch.ones(1) if updating else torch.zeros(1)

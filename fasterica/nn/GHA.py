@@ -93,6 +93,10 @@ class HebbianLayer(nn.Module):
         w[torch.isnan(w)] = 0.
         W = w.T  
         return W / self.online_var.std.detach()
+
+    @property
+    def explained_variance_(self):
+        return  self.online_var.std.detach()
     
     def step(self, ep, lr, param_group):
         self.has_converged()
