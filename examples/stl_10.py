@@ -22,8 +22,7 @@ dataloadert  = FastTensorDataLoader(tensors, batch_size=50)
 tensors = torch.from_numpy(X_val).float(), torch.empty(len(X_val))
 dataloaderv  = FastTensorDataLoader(tensors, batch_size=50)
 
-odel.fit(dataloadert, 30, X_val=dataloaderv)
-ica = FasterICA(n_components=256)    
+ica = FasterICA(n_components=256, whitening_strategy="GHA")
 
 print("Fitting data shape", X.shape, "on", ica.device)
 ica.fit(dataloadert, 10, dataloaderv)
