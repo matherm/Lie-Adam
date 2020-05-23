@@ -11,7 +11,7 @@ class Loss():
         # inverse soft hat
         ax = a1*x
         if ax.max() > 80 or ax.min() < -80:
-            warnings.warn(f"Exceeding range of cosh(). Maybe decrease a1: ({a1})")
+            warnings.warn(f"Exceeding range of cosh(). Maybe decreasing a1=({a1}) will help.")
             ax = torch.clamp(ax, -80, 80)
         return -(-torch.log( torch.cosh( ax ) + 1e-5 )/a1)
 

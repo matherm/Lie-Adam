@@ -18,10 +18,5 @@ dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=T
 
 ica = FasterICA(n_components=10)    
 
-device = "cpu"
-if torch.cuda.is_available():
-    ica.cuda()
-    device = "cuda"
-
-print("Fitting data: ", X.shape, "on", device)
+print("Fitting data: ", X.shape, "on", ica.device)
 ica.fit(dataloader, 100, dataloader_valid)

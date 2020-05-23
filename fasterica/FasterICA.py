@@ -25,9 +25,9 @@ class FasterICA():
     """
     def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5):
 
-        self.device = "cpu"
-        self.optimistic_whitening_rate = optimistic_whitening_rate
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.n_components = n_components
+        self.optimistic_whitening_rate = optimistic_whitening_rate
         self.whiten = whiten
         self.net = None
 
@@ -45,12 +45,17 @@ class FasterICA():
 
     def cuda(self):
         self.to("cuda")
+        return self
     
     def cpu(self):
         self.to("cpu")
+        return self
 
     def to(self, device):
         self.device = device
+        if self.net is not None:
+            self.net.to(device)
+        return self
     
     @property
     def unmixing_matrix(self, numpy=True):
@@ -83,7 +88,7 @@ class FasterICA():
     def _prepare_input(self, dataloader, validation_loader):
 
         if isinstance(dataloader, np.ndarray):
-            tensos =  torch.from_numpy(dataloader).float() , torch.empty(len(dataloader))
+            tensors =  torch.from_numpy(dataloader).float() , torch.empty(len(dataloader))
         if torch.is_tensor(dataloader):
             tensors = dataloader.float(), torch.empty(len(dataloader))
         if not isinstance(dataloader, torch.utils.data.DataLoader):        
