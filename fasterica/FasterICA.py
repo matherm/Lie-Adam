@@ -154,8 +154,8 @@ class FasterICA():
                 loss += self.loss(output).sum(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
-            loss = loss/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
-            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss[0]:.2f} / {loss[1]:.2f} / {loss[2]:.2f} (eval took: {time.time() - t0:.1f}s)")
+            loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
+            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
 
         for ep in range(epochs):
