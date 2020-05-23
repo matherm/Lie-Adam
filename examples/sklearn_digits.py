@@ -1,6 +1,8 @@
 from sklearn.datasets import make_moons, load_digits
 from fasterica import *
 
+print("Fasterica version", version)
+
 X = np.hstack([make_moons(n_samples=2000)[0] for d in range(100)])
 X_val = np.hstack([make_moons(n_samples=500)[0] for d in range(100)])
 X_val = X - X.mean()

@@ -1,6 +1,5 @@
-import torch
+import torch, warnings, scipy
 import numpy as np
-import scipy
 from ..helpers.mutual_information import mutual_information
 
 class Loss():

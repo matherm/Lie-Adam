@@ -23,7 +23,7 @@ class FasterICA():
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=1.0):
+    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5):
 
         self.device = "cpu"
         self.optimistic_whitening_rate = optimistic_whitening_rate
@@ -80,16 +80,30 @@ class FasterICA():
             return self.transform(torch.from_numpy(X)).cpu().numpy()
         return self.net(X).detach()
 
-    def fit(self, dataloader, epochs=10, validation_loader=None, lr=1e-3):
-        
-        if isinstance(dataloader, np.ndarray):
-            dataloader = FastTensorDataLoader((torch.from_numpy(dataloader).float(),torch.empty(len(dataloader))))
-        if torch.is_tensor(dataloader):
-            dataloader = FastTensorDataLoader((dataloader.float(), torch.empty(len(dataloader))))
+    def _prepare_input(self, dataloader, validation_loader):
 
+        if isinstance(dataloader, np.ndarray):
+            tensos =  torch.from_numpy(dataloader).float() , torch.empty(len(dataloader))
+        if torch.is_tensor(dataloader):
+            tensors = dataloader.float(), torch.empty(len(dataloader))
+        if not isinstance(dataloader, torch.utils.data.DataLoader):        
+            dataloader  = FastTensorDataLoader(tensors, batch_size=self.n_components)
+        
         if validation_loader is None:
             validation_loader = dataloader
+        else:
+            if isinstance(validation_loader, np.ndarray):
+                tensors =  torch.from_numpy(validation_loader).float() , torch.empty(len(validation_loader))
+            if torch.is_tensor(validation_loader):
+                tensors = validation_loader.float(), torch.empty(len(validation_loader))
+            if not isinstance(validation_loader, torch.utils.data.DataLoader):   
+                validation_loader = FastTensorDataLoader(tensors, batch_size=self.n_components)
 
+        return dataloader, validation_loader
+
+    def fit(self, dataloader, epochs=10, validation_loader=None, lr=1e-3):
+
+        dataloader, validation_loader = self._prepare_input(dataloader, validation_loader)
         dataset_size = len(dataloader) * dataloader.batch_size
         
         def fit(ep):
