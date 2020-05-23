@@ -3,4 +3,6 @@ fasterica.egg-info/
 **/.pytest_cache/**
 **/.eggs/**
 **/data/**
+**/build/**
+**/dist/**
 

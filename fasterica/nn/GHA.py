@@ -2,18 +2,21 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Function
+
+from ..helpers import *
 from .Variance_Layer import OnlineVariance
+from .Parameter import *
 
 EPS = 1e-7
 
 class DeltaRule(Function):
 
     @staticmethod
-    def forward(ctx, inpt, weight):
+    def forward(ctx, inpt, weight, mean, var, ups):
         norm = torch.norm(weight, dim=1).reshape(-1, 1)
         # needs to be done in-place, otherwise pytorch caches the wrong weights.
         weight /= norm 
-        ctx.save_for_backward(inpt, weight)
+        ctx.save_for_backward(inpt, weight, mean, var, ups)
         return inpt.mm(weight.t())
 
     @staticmethod
@@ -44,10 +47,23 @@ class DeltaRule(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        inpt, weight= ctx.saved_tensors
+        inpt, weight, mean_, var_, ups_ds_size = ctx.saved_tensors
         
         grad_input = grad_weight = None
+
+        n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)       
+        if n_samples_seen_ <= ds_size:          
+            col_mean, col_var, n_total_samples =  incremental_mean_and_var(
+                                                                    inpt, last_mean=mean_, last_variance=var_,
+                                                                    last_sample_count=n_samples_seen_)
+        else:
+           col_mean = mean_.clone() 
+           col_var = var_.clone()
+           n_total_samples = n_samples
         
+        # Update
+        ups_ds_size.data[0] = n_total_samples
+
         # Gradient w.r.t. input
         grad_input = grad_output.mm(weight)
         
@@ -57,7 +73,7 @@ class DeltaRule(Function):
         # Testing
         # grad_weight = DeltaRule.naive(weight, inpt)
         # assert torch.norm(grad_weight - DeltaRule.naive(weight, inpt)) < 1e-3
-        return grad_input, -grad_weight
+        return grad_input, -grad_weight, col_mean, col_var, None
 
 class HebbianLayer(nn.Module):
 
@@ -68,6 +84,10 @@ class HebbianLayer(nn.Module):
 
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         self.online_var = OnlineVariance(out_features, ds_size)
+
+        self.mean_ = NoGDParameter(torch.zeros(in_features), requires_grad=False)
+        self.var_ = NoGDParameter(torch.zeros(in_features), requires_grad=False)
+        self.ups_ds_size = torch.from_numpy(np.asarray([0., ds_size])).float()
 
         self.is_converged = False
         self.reset_parameters()
@@ -103,7 +123,8 @@ class HebbianLayer(nn.Module):
         param_group['lr'] = lr / np.sqrt(1 + 1 + ep) 
 
     def forward(self, X):
-        X = DeltaRule.apply(X, self.weight)
+        X = X - self.mean_
+        X = DeltaRule.apply(X, self.weight, self.mean_, self.var_, self.ups_ds_size)
         X = self.online_var(X)
         if self.is_converged:
             return X.detach()

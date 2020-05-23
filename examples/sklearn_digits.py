@@ -19,4 +19,4 @@ dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=T
 ica = FasterICA(n_components=10)    
 
 print("Fitting data: ", X.shape, "on", ica.device)
-ica.fit(dataloader, 100, dataloader_valid)
+ica.fit(dataloader, 10, dataloader_valid)
