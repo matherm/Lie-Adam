@@ -32,13 +32,14 @@ python setup.py install|develop
 pip install git+https://git.ios.htwg-konstanz.de/mof-applications/fasterica.git
 ```
 
-### Run example
-```
-python examples/sklearn_moons.py  
-```
-
-### Run tests
+### Tests
 
 ```
 pytest tests
 ```
+
+### Example
+```
+python examples/sklearn_moons.py  
+```
+
