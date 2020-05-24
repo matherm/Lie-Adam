@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from .imagenet import Imagenet
+from .imagenet_loader import Imagenet
 
 from fasterica import *
 
