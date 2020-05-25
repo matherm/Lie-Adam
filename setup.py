@@ -4,7 +4,7 @@ from setuptools.command.test import test
 from setuptools import find_packages
 import subprocess, os, sys
 
-install_requires = ["numpy >= 1.5.0", "scipy", "imageio", "scikit-learn","torch","tqdm"]
+install_requires = ["numpy >= 1.5.0", "scipy", "imageio", "scikit-learn","torch","tqdm", "torchvision"]
 setup_requires = ['pytest-runner', 'pytest', 'pytest-cov']
 
 def read_version(fname):
