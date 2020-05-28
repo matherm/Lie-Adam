@@ -45,6 +45,68 @@ def entropy_gaussian(C):
         return .5*n*(1 + np.log(2*pi)) + .5*np.log(abs(det(C)))
 
 
+def joint_entropy(variables, k=1):
+    ''' Returns the entropy of the X.
+
+    Parameters
+    ===========
+
+    X : array-like, shape (n_samples, n_features)
+        The data the entropy of which is computed
+
+    k : int, optional
+        number of nearest neighbors for density estimation
+
+    Notes
+    ======
+    Kraskov A, Stogbauer H, Grassberger P. (2004). Estimating mutual
+    information. Phys Rev E 69(6 Pt 2):066138.
+    
+    Eq. 21
+    '''
+    r = nearest_distances(np.hstack(variables), k) # squared distances
+    n, dtype = variables[0].shape[0], variables[0].dtype
+    d = np.sum([var.shape[1] for var in variables])
+    volume_unit_ball = np.prod([(pi**(.5*var.shape[1])) / gamma(.5*var.shape[1] + 1)/2**var.shape[1] for var in variables])
+    return -(d*np.mean(np.log(2*r + np.finfo(dtype).eps)) + np.log(volume_unit_ball) + psi(n) - psi(k))
+
+def entropy_22(X, k=1):
+    '''
+    Kraskov A, Stogbauer H, Grassberger P. (2004). Estimating mutual
+    information. Phys Rev E 69(6 Pt 2):066138.
+    
+    Eq. 22
+    '''
+    return -entropy(X, k)
+
+
+def mutual_information_I1(variables, k=1):
+    '''
+    Returns the mutual information between any number of variables.
+    Each variable is a matrix X = array(n_samples, n_features)
+    where
+      n = number of samples
+      dx,dy = number of dimensions
+
+    Optionally, the following keyword argument can be specified:
+      k = number of nearest neighbors for density estimation
+
+    Example: mutual_information((X, Y)), mutual_information((X, Y, Z), k=5)
+
+    Notes
+    ======
+    Kraskov A, Stogbauer H, Grassberger P. (2004). Estimating mutual
+    information. Phys Rev E 69(6 Pt 2):066138.
+    
+    Eq. 10
+    '''
+    if len(variables) < 2:
+        raise AttributeError(
+                "Mutual information must involve at least 2 variables")
+    return (sum([entropy(X, k=k) for X in variables])
+            - joint_entropy(variables, k=k))
+
+
 def entropy(X, k=1):
     ''' Returns the entropy of the X.
 
