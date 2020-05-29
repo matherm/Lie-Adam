@@ -33,18 +33,20 @@ class Bernstein():
         zero    = [lambda x,n=n: -n *  basis[0](x)]
         default = [lambda x,i=i:  n * (basis[i-1](x) - basis[i](x)) for i in range(1, n)]
         nth     = [lambda x,n=n:  n *  basis[n-1](x)]                               
-        return zero + default + nth
+        return  zero + default + nth
         
     def __call__(self, x, a=None):
         """
         Returns the evaluated basis functions as Tensor with shape (B, m, values).
+        
+        x (B, n) : values
+        a (B, 1) : coefficents
         
         Usage:
             y = bernstein(X).sum(1)
         """
         self.a = a if a is not None else self.a
         return torch.stack([a.unsqueeze(1) * Be_i(x) for a, Be_i in zip(self.a.T, self.basis)]).transpose(0,1)
-    
     
     def df(self, x, a=None):
         """
@@ -90,7 +92,7 @@ class BernsteinTransform(nn.Module):
     """
     Transforms a 1D-Probability Distribution with a monotonic Bernstein Polynomial.
     """
-    def __init__(self, n=3, n_neurons = 20, conditional=False):
+    def __init__(self, n=3, n_neurons = 20, conditional=False, n_outputs=1):
         super().__init__()
         self.n = n
         self.bernstein = Bernstein(n)   
@@ -99,20 +101,20 @@ class BernsteinTransform(nn.Module):
             #shared network
             self.nn = nn.Sequential(nn.Linear(1, n_neurons), nn.ReLU(), nn.Linear(n_neurons, n_neurons), nn.ReLU())  
             #scale and shift stage I
-            self.nn_a = nn.Sequential(nn.Linear(n_neurons, 1), nn.Softplus())
-            self.nn_b  = nn.Linear(n_neurons, 1) 
+            self.nn_a = nn.Sequential(nn.Linear(n_neurons, n_outputs), nn.Softplus())
+            self.nn_b  = nn.Linear(n_neurons, n_outputs) 
             #scale and shift stage II
-            self.nn_alpha = nn.Sequential(nn.Linear(n_neurons, 1), nn.Softplus())
-            self.nn_beta = nn.Linear(n_neurons, 1)       
+            self.nn_alpha = nn.Sequential(nn.Linear(n_neurons, n_outputs), nn.Softplus())
+            self.nn_beta = nn.Linear(n_neurons, n_outputs)       
             # bezier polynomials a.k.a. bernstein coefficients
             self.coeffs = nn.Sequential(nn.Linear(n_neurons, n_neurons), nn.ReLU(), nn.Linear(n_neurons, n+1))     
         else:
             # unconditional parameters
-            self.coeffs = nn.Parameter(torch.distributions.Uniform(-1,1).sample((1,n+1)))
-            self.a = nn.Parameter(torch.ones(1))
-            self.b = nn.Parameter(torch.zeros(1))
-            self.alpha = nn.Parameter(torch.ones(1))
-            self.beta = nn.Parameter(torch.zeros(1))    
+            self.coeffs = nn.Parameter(torch.distributions.Uniform(-1,1).sample((n_outputs,n+1)))
+            self.a = nn.Parameter(torch.ones((n_outputs, 1)))
+            self.b = nn.Parameter(torch.zeros((n_outputs, 1)))
+            self.alpha = nn.Parameter(torch.ones((n_outputs, 1)))
+            self.beta = nn.Parameter(torch.zeros((n_outputs, 1)))  
             
     @staticmethod
     def ascending(a):
@@ -172,14 +174,14 @@ class BernsteinTransform(nn.Module):
 import torch.nn.functional as F
 class TransformationFlow(nn.Module): 
     
-    def __init__(self, n=10, conditional=True):    
+    def __init__(self, n=10, conditional=True, n_outputs=1):    
         super().__init__()
         
         # variables
         self.conditional = conditional   
         
         # bernstein bijector
-        self.bernstein = BernsteinTransform(n=n,conditional=conditional)
+        self.bernstein = BernsteinTransform(n=n,conditional=conditional,n_outputs=n_outputs)
             
     def forward(self, X): 
         return X
@@ -188,7 +190,7 @@ class TransformationFlow(nn.Module):
         """
         Samples y by transforming z ~ N(0,1).
         """
-        z = torch.distributions.Normal(0, 1).sample((len(self.bernstein.params[0]), size))
+        z = torch.distributions.Normal(0, 1).sample((len(self.bernstein.a), size))
         y = self.bernstein.inverse(z, X)
         return y.detach() 
         
@@ -225,14 +227,13 @@ class TransformationFlow(nn.Module):
                         
             optim.step()
             if i % 400 == 0:
-                print("iter:", i, "nll:", loss_ep.item(), "val:", loss_val.item())                   
-                
+                print("iter:", i, "nll:", loss_ep.item(), "val:", loss_val.item())      
                 
 class ParametricLoss(nn.Module):
     
     def __init__(self, n_components):
         super().__init__()
-        self.flow_per_dim = nn.ModuleList([TransformationFlow(conditional=False) for i in range(n_components)])
+        self.flow_per_dim = TransformationFlow(conditional=False, n_outputs=n_components)
 
     def __call__(self, s):
         """
@@ -240,5 +241,25 @@ class ParametricLoss(nn.Module):
 
         Return
             negative log probability (B, n_components)
+        """ 
+        return -self.flow_per_dim.log_prob(None, s.T).T
+
+
+class ParametricLossNaiv(nn.Module):
+    
+    def __init__(self, n_components):
+        super().__init__()
+        self.flow_per_dim = nn.ModuleList([TransformationFlow(conditional=False) for i in range(n_components)])
+    
+    def __call__(self, s):
         """
-        return -torch.cat([self.flow_per_dim[i].log_prob(None, s[:,i:i+1]) for i in range(len(self.flow_per_dim))], dim=1)   
+        s (B, n_components) : the estimated components
+
+        Return
+            negative log probability (B, n_components)
+        """ 
+        logs = []
+        for i in range(len(self.flow_per_dim)):
+            log_p = self.flow_per_dim[i].log_prob(None, s[:,i:i+1].reshape(1, -1))
+            logs.append(log_p)
+        return -torch.cat(logs, dim=0).T  
