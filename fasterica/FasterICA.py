@@ -145,7 +145,7 @@ class FasterICA(nn.Module):
                 
                 self.optim.zero_grad()
                 output = self.net(data)
-                loss = self.loss(output).sum(1).mean()
+                loss = self.loss(output).mean(1).mean()
                 loss.backward()
                 self.optim.step()
             
