@@ -57,7 +57,7 @@ class FasterICA(nn.Module):
 
     def reset(self, input_dim, dataset_size, lr=1e-3):
         self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
-        if self.loss == "parametric":
+        if isinstance(self.loss, nn.Module):
             self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
                                    {'params': self.net.ica.parameters()},
                                    {'params': self.loss.parameters()}], lr=lr)
