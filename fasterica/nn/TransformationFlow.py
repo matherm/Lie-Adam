@@ -226,3 +226,19 @@ class TransformationFlow(nn.Module):
             optim.step()
             if i % 400 == 0:
                 print("iter:", i, "nll:", loss_ep.item(), "val:", loss_val.item())                   
+                
+                
+class ParametricLoss(nn.Module):
+    
+    def __init__(self, n_components):
+        super().__init__()
+        self.flow_per_dim = nn.ModuleList([TransformationFlow(conditional=False) for i in range(n_components)])
+
+    def __call__(self, s):
+        """
+        s (B, n_components) : the estimated components
+
+        Return
+            negative log probability (B, n_components)
+        """
+        return -torch.cat([self.flow_per_dim[i].log_prob(None, s[:,i:i+1]) for i in range(len(self.flow_per_dim))], dim=1)   
