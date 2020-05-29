@@ -47,6 +47,8 @@ class FasterICA():
             self.loss = Loss.Logcosh
         elif loss == "exp":
             self.loss = Loss.Exp
+        elif loss == "parametric":
+            self.loss = ParametricLoss(n_components)
         elif callable(loss):
             self.loss = loss
         else:
