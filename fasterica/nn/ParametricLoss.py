@@ -190,7 +190,7 @@ class TransformationFlow(nn.Module):
         """
         Samples y by transforming z ~ N(0,1).
         """
-        z = torch.distributions.Normal(0, 1).sample((len(self.bernstein.a), size)).to(self.device)
+        z = torch.distributions.Normal(0, 1).sample((len(self.bernstein.a), size)).to(self.bernstein.a.device)
         y = self.bernstein.inverse(z, X)
         return y.detach() 
         
