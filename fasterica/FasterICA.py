@@ -56,7 +56,7 @@ class FasterICA():
         self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
         self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
                                {'params': self.net.ica.parameters()}], lr=lr)
-        self.net.to(self.device)
+        self.to(self.device)
 
     def cuda(self):
         self.to("cuda")
@@ -70,6 +70,8 @@ class FasterICA():
         self.device = device
         if self.net is not None:
             self.net.to(device)
+        if isinstance(self.loss, nn.Module):
+            self.loss.to(device)
         return self
     
     @property
