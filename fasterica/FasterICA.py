@@ -57,9 +57,13 @@ class FasterICA(nn.Module):
 
     def reset(self, input_dim, dataset_size, lr=1e-3):
         self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
-        #self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
-        #                       {'params': self.net.ica.parameters()}], lr=lr)
-        self.optim = Adam_Lie(self.parameters(), lr=lr)
+        if self.loss == "parametric":
+            self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
+                                   {'params': self.net.ica.parameters()},
+                                   {'params': self.loss.parameters()}], lr=lr)
+        else:
+            self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
+                                   {'params': self.net.ica.parameters()}], lr=lr)
         self.to(self.device)
 
     def cuda(self):

@@ -33,3 +33,13 @@ class Loss():
     @staticmethod
     def MI(S):
         return mutual_information(S)
+
+    @staticmethod
+    def grad_norm(params_old, params_new):
+        grad_old = []
+        for w in params_old:
+            grad_old.append(w.grad.flatten().detach())
+        grad_new = []
+        for w in params_old:
+            grad_new.append(w.grad.flatten().detach())
+        return torch.norm(grad_old - grad_new)
