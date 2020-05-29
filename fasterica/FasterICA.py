@@ -22,12 +22,13 @@ class Net(nn.Module):
     def forward(self, X):
         return self.layers(X)
 
-class FasterICA():
+class FasterICA(nn.Module):
 
     """
     tbd.
     """
     def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5, whitening_strategy="batch"):
+        super().__init__()
 
         if whitening_strategy not in ["GHA", "batch"]:
             raise ValueError(f"Whitening strategy {whitening_strategy} not understood.")
@@ -56,8 +57,9 @@ class FasterICA():
 
     def reset(self, input_dim, dataset_size, lr=1e-3):
         self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
-        self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
-                               {'params': self.net.ica.parameters()}], lr=lr)
+        #self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
+        #                       {'params': self.net.ica.parameters()}], lr=lr)
+        self.optim = Adam_Lie(self.parameters(), lr=lr)
         self.to(self.device)
 
     def cuda(self):
