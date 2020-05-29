@@ -47,6 +47,8 @@ class FasterICA():
             self.loss = Loss.Logcosh
         elif loss == "exp":
             self.loss = Loss.Exp
+        elif callable(loss):
+            self.loss = loss
         else:
             raise ValueError(f"loss={loss} not understood.")
 
