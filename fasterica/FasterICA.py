@@ -159,7 +159,7 @@ class FasterICA(nn.Module):
             for batch in validation_loader:
                 data, label = batch[0].to(self.device), None
                 output = self.net(data)
-                loss += self.loss(output).sum(1).mean().detach()
+                loss += self.loss(output).mean(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
             loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
