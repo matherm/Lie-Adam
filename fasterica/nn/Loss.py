@@ -56,10 +56,13 @@ class Loss():
         return mutual_information(S)
 
     @staticmethod
-    def MI_negentropy(S, G_fun=Loss.Logcosh, y=np.random.normal(0,1,1000)):
+    def MI_negentropy(S, G_fun=None, y=np.random.normal(0,1,1000)):
         """
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
+        if G_fun is None:
+            G_fun = Loss.Logcosh
+            
         E_G_z = G_fun(Z).mean(0) 
         E_G_g = G_fun(y).mean(0) 
         
