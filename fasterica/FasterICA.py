@@ -141,6 +141,7 @@ class FasterICA(nn.Module):
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
             else:
                 iterator = zip(dataloader, range(len(dataloader)))
+            losses = 0.
             for batch, _ in iterator:
                 data, label = batch[0].to(self.device), None
                 
@@ -152,11 +153,13 @@ class FasterICA(nn.Module):
                 loss = self.loss(output).mean(1).mean()
                 loss.backward()
                 self.optim.step()
-            
+                losses += loss.detach()
+
             if isinstance(self.net.whiten, HebbianLayer):
                 self.net.whiten.step(ep, lr, self.optim.param_groups[0])
-
-        def evaluate(ep):
+            return  losses.cpu().item()/len(dataloader)
+            
+        def evaluate(ep, train_loss):
             loss = 0.
             datalist = []
             t0 = time.time()
@@ -167,11 +170,11 @@ class FasterICA(nn.Module):
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
             loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
-            print(f"Ep.{ep:3} - validation (loss/white/kurt): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} (eval took: {time.time() - t0:.1f}s)")
+            print(f"Ep.{ep:3} - {train_loss:.2f} - validation (loss/white/kurt): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
 
         for ep in range(epochs):
-            fit(ep)
-            evaluate(ep)
+            train_loss = fit(ep)
+            evaluate(ep, train_loss)
 
         return self.history

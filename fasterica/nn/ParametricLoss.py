@@ -231,9 +231,9 @@ class TransformationFlow(nn.Module):
                 
 class ParametricLoss(nn.Module):
     
-    def __init__(self, n_components):
+    def __init__(self, n_components, n=10):
         super().__init__()
-        self.flow_per_dim = TransformationFlow(conditional=False, n_outputs=n_components)
+        self.flow_per_dim = TransformationFlow(n=n, conditional=False, n_outputs=n_components)
 
     def __call__(self, s):
         """
@@ -247,9 +247,9 @@ class ParametricLoss(nn.Module):
 
 class ParametricLossNaiv(nn.Module):
     
-    def __init__(self, n_components):
+    def __init__(self, n_components, n=10):
         super().__init__()
-        self.flow_per_dim = nn.ModuleList([TransformationFlow(conditional=False) for i in range(n_components)])
+        self.flow_per_dim = nn.ModuleList([TransformationFlow(n=n, conditional=False) for i in range(n_components)])
     
     def __call__(self, s):
         """

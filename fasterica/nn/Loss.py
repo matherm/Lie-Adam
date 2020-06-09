@@ -1,8 +1,15 @@
 import torch, warnings, scipy
 import numpy as np
+from torch.nn.functional import relu
 from ..helpers.mutual_information import mutual_information
 
 class Loss():
+
+    @staticmethod
+    def NNICA(x):
+        """Non-negative ICA
+        """
+        return 1/2 * torch.pow(-relu(-x), 2)
 
     @staticmethod
     def Logcosh(x, a1=1.2):
@@ -23,6 +30,20 @@ class Loss():
         return -(torch.exp(-a2/2*x**2)/a2)
 
     @staticmethod
+    def LogcoshNormalized(x):
+        """is proportional negative log-likelihood
+        """
+        # inverse soft hat
+        return -(-2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi))
+
+    @staticmethod
+    def ExpNormalized(x):
+        """is proportional negative log-likelihood
+        """
+        # hat
+        return -(torch.exp(-np.sqrt(2)*torch.abs(x))/np.sqrt(2))
+
+    @staticmethod
     def FrobCov(S):
         return np.linalg.norm(np.cov((S).T) - np.eye(S.shape[1])) / S.shape[1]
 
@@ -33,6 +54,17 @@ class Loss():
     @staticmethod
     def MI(S):
         return mutual_information(S)
+
+    @staticmethod
+    def MI_negentropy(S, G_fun=Loss.Logcosh, y=np.random.normal(0,1,1000)):
+        """
+        https://ieeexplore.ieee.org/abstract/document/5226546
+        """
+        E_G_z = G_fun(Z).mean(0) 
+        E_G_g = G_fun(y).mean(0) 
+        
+        J_z = (E_G_z - E_G_g)**2
+        return -J_z.sum()
 
     @staticmethod
     def grad_norm(params_old, params_new):
