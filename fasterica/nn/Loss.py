@@ -31,14 +31,14 @@ class Loss():
 
     @staticmethod
     def LogcoshNormalized(x):
-        """is proportional negative log-likelihood
+        """is negative log-likelihood
         """
         # inverse soft hat
         return -(-2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi))
 
     @staticmethod
     def ExpNormalized(x):
-        """is proportional negative log-likelihood
+        """is negative log-likelihood
         """
         # hat
         return -(torch.exp(-np.sqrt(2)*torch.abs(x))/np.sqrt(2))

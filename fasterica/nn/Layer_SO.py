@@ -28,7 +28,7 @@ class F_SO_Linear(Function):
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
-        grad_input = grad_output.mm(weight)
+        # grad_input = grad_output.mm(weight) # gradient is not needed in previous layers
         # Gradient w.r.t. weights
         grad_weight = grad_output.T.mm(inpt)
         grad_lie = lie_bracket(weight, grad_weight)

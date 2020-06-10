@@ -66,6 +66,10 @@ class FasterICA(nn.Module):
                                    {'params': self.net.ica.parameters()}], lr=lr)
         self.to(self.device)
 
+    def reduce_lr(self, by=1e-1):
+        for param in self.optim.param_groups:
+            param["lr"] = param["lr"] * by
+
     def cuda(self):
         self.to("cuda")
         return self
@@ -108,7 +112,7 @@ class FasterICA(nn.Module):
     def grad(self):
         if self.net is None:
             return 0.
-        grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.requires_grad]
+        grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.grad is not None and w.requires_grad]
         return torch.cat(grad).flatten().clone()
 
     def transform(X):
@@ -121,7 +125,7 @@ class FasterICA(nn.Module):
         if bs == "auto":
             bs = self.n_components
 
-        if bs < self.n_components:
+        if bs < self.n_components and self.whiten:
             raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={self.n_components}")
         
         if isinstance(dataloader, np.ndarray):
@@ -154,6 +158,8 @@ class FasterICA(nn.Module):
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
             else:
                 iterator = zip(dataloader, range(len(dataloader)))
+            if ep >= int(0.9 * epochs):
+                self.reduce_lr()
             losses = 0.
             for batch, _ in iterator:
                 data, label = batch[0].to(self.device), None
