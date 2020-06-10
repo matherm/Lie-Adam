@@ -105,6 +105,12 @@ class FasterICA(nn.Module):
     def explained_variance_(self):
         return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
+    def grad(self):
+        if self.net is None:
+            return 0.
+        grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.requires_grad]
+        return torch.cat(grad).flatten().clone()
+
     def transform(X):
         if not torch.is_tensor(X):
             return self.transform(torch.from_numpy(X)).cpu().numpy()
@@ -142,7 +148,7 @@ class FasterICA(nn.Module):
         dataloader, validation_loader = self._prepare_input(X, X_val, bs)
         dataset_size = len(dataloader) * dataloader.batch_size
         t_start = time.time()
-        
+          
         def fit(ep):
             if ep == 0:
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
@@ -176,11 +182,12 @@ class FasterICA(nn.Module):
                 loss += self.loss(output).mean(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
-            loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S), Loss.MI_negentropy(S), time.time() - t_start
+            loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S), Loss.MI_negentropy(S), time.time() - t_start, Loss.grad_norm(grad_old, self.grad())
             print(f"Ep.{ep:3} - {train_loss:.2f} - validation (loss/white/kurt/mi): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} / {loss[4]:.2f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
-
+            
         for ep in range(epochs):
+            grad_old = self.grad()
             train_loss = fit(ep)
             evaluate(ep, train_loss)
 
