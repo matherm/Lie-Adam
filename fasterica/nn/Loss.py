@@ -61,9 +61,9 @@ class Loss():
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
         if G_fun is None:
-            G_fun = Loss.Logcosh
+            G_fun = lambda x : Loss.Logcosh(torch.from_numpy(x)).numpy()
             
-        E_G_z = G_fun(Z).mean(0) 
+        E_G_z = G_fun(S).mean(0) 
         E_G_g = G_fun(y).mean(0) 
         
         J_z = (E_G_z - E_G_g)**2

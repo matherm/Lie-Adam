@@ -110,14 +110,20 @@ class FasterICA(nn.Module):
             return self.transform(torch.from_numpy(X)).cpu().numpy()
         return self.net(X).detach()
 
-    def _prepare_input(self, dataloader, validation_loader):
+    def _prepare_input(self, dataloader, validation_loader, bs):
 
+        if bs == "auto":
+            bs = self.n_components
+
+        if bs < self.n_components:
+            raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={self.n_components}")
+        
         if isinstance(dataloader, np.ndarray):
             tensors =  torch.from_numpy(dataloader).float() , torch.empty(len(dataloader))
         if torch.is_tensor(dataloader):
             tensors = dataloader.float(), torch.empty(len(dataloader))
         if not isinstance(dataloader, torch.utils.data.DataLoader):        
-            dataloader  = FastTensorDataLoader(tensors, batch_size=self.n_components)
+            dataloader  = FastTensorDataLoader(tensors, batch_size=bs)
         
         if validation_loader is None:
             validation_loader = dataloader
@@ -127,14 +133,15 @@ class FasterICA(nn.Module):
             if torch.is_tensor(validation_loader):
                 tensors = validation_loader.float(), torch.empty(len(validation_loader))
             if not isinstance(validation_loader, torch.utils.data.DataLoader):   
-                validation_loader = FastTensorDataLoader(tensors, batch_size=self.n_components)
+                validation_loader = FastTensorDataLoader(tensors, batch_size=bs)
 
         return dataloader, validation_loader
 
-    def fit(self, X, epochs=10, X_val=None, lr=1e-3):
+    def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs="auto"):
 
-        dataloader, validation_loader = self._prepare_input(X, X_val)
+        dataloader, validation_loader = self._prepare_input(X, X_val, bs)
         dataset_size = len(dataloader) * dataloader.batch_size
+        t_start = time.time()
         
         def fit(ep):
             if ep == 0:
@@ -169,8 +176,8 @@ class FasterICA(nn.Module):
                 loss += self.loss(output).mean(1).mean().detach()
                 datalist.append(data.detach())
             S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
-            loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S)
-            print(f"Ep.{ep:3} - {train_loss:.2f} - validation (loss/white/kurt): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} (eval took: {time.time() - t0:.1f}s)")
+            loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S), Loss.MI_negentropy(S), time.time() - t_start
+            print(f"Ep.{ep:3} - {train_loss:.2f} - validation (loss/white/kurt/mi): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} / {loss[4]:.2f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
 
         for ep in range(epochs):
