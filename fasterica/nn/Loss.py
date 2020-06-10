@@ -71,4 +71,4 @@ class Loss():
 
     @staticmethod
     def grad_norm(grad_old, grad_new):
-        return torch.norm(grad_old - grad_new)
+        return torch.norm(grad_old - grad_new).cpu().detach().item()
