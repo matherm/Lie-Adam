@@ -12,6 +12,12 @@ class Loss():
         return 1/2 * torch.pow(-relu(-x), 2)
 
     @staticmethod
+    def Identity(x):
+        """Used for relative gradients
+        """
+        return x
+
+    @staticmethod
     def Logcosh(x, a1=1.2):
         """is proportional negative log-likelihood
         """

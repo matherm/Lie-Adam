@@ -7,13 +7,21 @@ from fasterica import *
 
 class Net(nn.Module):
 
-    def __init__(self, n_input, n_components, whiten=True, whitening_strategy="batch", dataset_size=-1):
+    def __init__(self, n_input, n_components, whiten=True, whitening_strategy="batch", dataset_size=-1, derivative="lie", fun=Loss.Logcosh):
         super().__init__()
+        
         if whitening_strategy == "batch":
             self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
         if whitening_strategy == "GHA":
             self.whiten = HebbianLayer(n_input, n_components, dataset_size)
-        self.ica    = SO_Layer(n_components)
+        
+        if derivative == "lie":
+            self.ica    = SO_Layer(n_components)
+        elif derivative == "relative":
+            self.ica    = Relative_Gradient(n_components, fun)
+        else:
+            ValueError(f"derivative={derivative} not understood.")
+
         if whiten:
             self.layers = nn.Sequential(self.whiten, self.ica)
         else:
@@ -27,7 +35,7 @@ class FasterICA(nn.Module):
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5, whitening_strategy="batch"):
+    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie"):
         super().__init__()
 
         if whitening_strategy not in ["GHA", "batch"]:
@@ -39,9 +47,11 @@ class FasterICA(nn.Module):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.n_components = n_components
         self.optimistic_whitening_rate = optimistic_whitening_rate
+        self.derivative = derivative
         self.whiten = whiten
         self.whitening_strategy = whitening_strategy
         self.net = None
+        self.optim = None
         self.history = []
 
         if loss == "logcosh":
@@ -50,13 +60,15 @@ class FasterICA(nn.Module):
             self.loss = Loss.Exp
         elif loss == "parametric":
             self.loss = ParametricLoss(n_components)
+        elif loss == "id":
+            self.loss = Loss.Identity
         elif callable(loss):
             self.loss = loss
         else:
             raise ValueError(f"loss={loss} not understood.")
 
     def reset(self, input_dim, dataset_size, lr=1e-3):
-        self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate))
+        self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.loss)
         if isinstance(self.loss, nn.Module):
             self.optim = Adam_Lie([{'params': self.net.whiten.parameters()},
                                    {'params': self.net.ica.parameters()},
@@ -67,8 +79,9 @@ class FasterICA(nn.Module):
         self.to(self.device)
 
     def reduce_lr(self, by=1e-1):
-        for param in self.optim.param_groups:
-            param["lr"] = param["lr"] * by
+        if self.optim is not None:
+            for param in self.optim.param_groups:
+                param["lr"] = param["lr"] * by
 
     def cuda(self):
         self.to("cuda")
@@ -158,7 +171,7 @@ class FasterICA(nn.Module):
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
             else:
                 iterator = zip(dataloader, range(len(dataloader)))
-            if ep >= int(0.9 * epochs):
+            if ep == int(0.9 * epochs):
                 self.reduce_lr()
             losses = 0.
             for batch, _ in iterator:
