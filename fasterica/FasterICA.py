@@ -199,8 +199,8 @@ class FasterICA(nn.Module):
                 data, label = batch[0].to(self.device), None
                 output = self.net(data)
                 loss += self.loss(output).mean(1).mean().detach()
-                datalist.append(data.detach())
-            S = torch.cat(datalist, dim=0).cpu().numpy() @  self.unmixing_matrix
+                datalist.append(output.detach())
+            S = torch.cat(datalist, dim=0).cpu().numpy()
             loss = ep, loss.cpu().item()/len(validation_loader), Loss.FrobCov(S), Loss.Kurtosis(S), Loss.MI_negentropy(S), time.time() - t_start, Loss.grad_norm(grad_old, self.grad())
             print(f"Ep.{ep:3} - {train_loss:.2f} - validation (loss/white/kurt/mi): {loss[1]:.2f} / {loss[2]:.2f} / {loss[3]:.2f} / {loss[4]:.2f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
