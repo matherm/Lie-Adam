@@ -15,7 +15,7 @@ class F_Batch_PCA(Function):
     @staticmethod
     def forward(ctx, inpt, weight, S, explained_var, mean_, var_, ups_ds_size, updating):
         ctx.save_for_backward(inpt, weight, S, explained_var, mean_, var_, ups_ds_size, updating)
-        return  inpt.mm(weight.T)  / torch.sqrt(explained_var)
+        return  (inpt - mean_).mm(weight.T)  / torch.sqrt(explained_var)
         
     @staticmethod
     def backward(ctx, grad_output):
