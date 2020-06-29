@@ -11,12 +11,12 @@ X = X - X.mean()
 X = X / X.std()
 
 dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+dataloader = torch.utils.data.DataLoader(dataset, batch_size=20, shuffle=True)
 
 dataset = torch.utils.data.TensorDataset(torch.from_numpy(X_val).float())
-dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
+dataloader_valid = torch.utils.data.DataLoader(dataset, batch_size=20, shuffle=True)
 
-ica = FasterICA(n_components=10)    
+ica = FasterICA(n_components=10,optimizer="adam")    
 
 print("Fitting data: ", X.shape, "on", ica.device)
-ica.fit(dataloader, 10, dataloader_valid)
+ica.fit(dataloader, 10, dataloader_valid ,lr=1e-1,logging=1 )

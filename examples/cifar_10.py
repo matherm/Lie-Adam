@@ -17,9 +17,9 @@ X_val = X / X.std()
 X = X - X.mean()  
 X = X / X.std()
 
-ica = FasterICA(n_components=100, whitening_strategy="GHA", derivative="relative", loss="logcosh")    
+ica = FasterICA(n_components=100, whitening_strategy="GHA", derivative="lie", loss="neglogcosh")    
 print("Fitting data shape", X.shape, "on", ica.device)
-ica.fit(X, 10, X_val, lr=1e-3)
+ica.fit(X, 10, X_val, lr=1e-3, logging=1)
 show_filters_color( ica.mixing_matrix.T)
 plt.savefig("./cifar10-components-gha.png")
 

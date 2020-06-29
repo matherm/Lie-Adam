@@ -14,8 +14,8 @@ def isnan(x):
 def score_function(p_prime, p):
     return p_prime/p
 
-def relative_gradient(grad_score, score, output):
-    psi = score_function(grad_score, score)
+def relative_gradient(grad_output, fun_output, output):
+    psi = score_function(grad_output, fun_output)
     return psi.T @ output 
 
 class F_SO_Linear_Relative(Function):
@@ -27,14 +27,16 @@ class F_SO_Linear_Relative(Function):
         return outpt
 
     @staticmethod
-    def backward(ctx, grad_score):
-        inpt, weight, output, score = ctx.saved_tensors
+    def backward(ctx, grad_output):
+        inpt, weight, output, fun_output = ctx.saved_tensors
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
         # grad_input = grad_output.mm(weight) # gradient is not needed in previous layers
         # Gradient w.r.t. weights
-        G = relative_gradient(grad_score, score, output)
+        G = relative_gradient(grad_output, fun_output, output)
+        # K = torch.mean(grad_output, dim=0) - torch.diag(G)
+        # G = G * torch.sign(K)
         grad_rel = G - G.T
         return grad_input, grad_rel, None
 

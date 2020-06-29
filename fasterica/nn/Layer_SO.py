@@ -6,6 +6,7 @@ from torch.autograd import Function
 from torch.nn.parameter import Parameter
 
 from .Parameter import *
+from .Loss import Loss
 
 def isnan(x):
     return (x != x).sum() > 0
@@ -18,13 +19,13 @@ class F_SO_Linear(Function):
 
     @staticmethod
     def forward(ctx, inpt, weight):
-        ctx.save_for_backward(inpt, weight)
         outpt = inpt.mm(weight.T)
+        ctx.save_for_backward(inpt, weight, outpt)
         return outpt
 
     @staticmethod
     def backward(ctx, grad_output):
-        inpt, weight = ctx.saved_tensors
+        inpt, weight, outpt = ctx.saved_tensors
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
@@ -39,6 +40,10 @@ class SO_Layer(nn.Module):
     def __init__(self, n_dims):
         super().__init__()
         self.weight = SOParameter(torch.eye(n_dims))
+        self.reset_()
+
+    def reset_(self):
+        self.weight.data = torch.qr(torch.distributions.Normal(0,0.01).sample(self.weight.data.shape))[0]
 
     @property
     def components_(self):

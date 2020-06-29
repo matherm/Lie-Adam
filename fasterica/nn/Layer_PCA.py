@@ -65,14 +65,17 @@ class Batch_PCA_Layer(nn.Module):
 
     def __init__(self, n_in, n_out, ds_size=2, updating=True):
         super().__init__()
-        self.weight = NoGDParameter(torch.ones(n_out, n_in))
+        if n_in == n_out:
+            self.weight = NoGDParameter(torch.eye(n_out))
+        else:
+            self.weight = NoGDParameter(torch.ones(n_out, n_in)/10)
         self.S = NoGDParameter(torch.zeros(n_out))
         self.bias = NoGDParameter(torch.ones(n_out))
 
         self.mean_ = NoGDParameter(torch.zeros(n_in))
         self.var_ = NoGDParameter(torch.zeros(n_in))
 
-        self.ups_ds_size = torch.from_numpy(np.asarray([0., ds_size])).float()
+        self.ups_ds_size = torch.Tensor([0., ds_size])
         self.n_components = n_out
         self.updating = torch.ones(1) if updating else torch.zeros(1)
 

@@ -8,8 +8,11 @@ from ..nn import NoGDParameter, SOParameter
 def isnan(x):
     return (x != x).sum() > 0
 
-def skew_symmetric(x):
-    return x.triu(1) - x.triu(1).T
+def skew_symmetric(x, triuidx, shape):
+    skew = torch.zeros(*shape).to(x.device) 
+    skew[triuidx[0], triuidx[1]] = x
+    skew.T[triuidx[0], triuidx[1]] = -x
+    return skew
 
 class Adam_Lie(torch.optim.Adam):
 
@@ -28,7 +31,14 @@ class Adam_Lie(torch.optim.Adam):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                if isinstance(p, SOParameter):
+                    triuidx = torch.triu_indices(*p.grad.shape, offset=1).to(p.grad.device)
+                    grad = p.grad.data[triuidx[0], triuidx[1]]
+                    param_shape = p.data[triuidx[0], triuidx[1]]
+                else:
+                    grad = p.grad.data
+                    param_shape = p.data  
+
                 if grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
                 
@@ -39,12 +49,12 @@ class Adam_Lie(torch.optim.Adam):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
+                    state['exp_avg'] = torch.zeros_like(param_shape)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    state['exp_avg_sq'] = torch.zeros_like(param_shape)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+                        state['max_exp_avg_sq'] = torch.zeros_like(param_shape)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 if amsgrad:
@@ -59,8 +69,8 @@ class Adam_Lie(torch.optim.Adam):
                     grad.add_(group['weight_decay'], p.data)
 
                 # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
                 if amsgrad:
                     # Maintains the maximum of all 2nd moment running avg. till now
                     torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
@@ -73,11 +83,11 @@ class Adam_Lie(torch.optim.Adam):
 
                 if isinstance(p, SOParameter):
                     #  Compute the exponential_map of so(n)
-                    direction = expm(-step_size/denom * skew_symmetric(exp_avg)).data  
+                    direction = expm( skew_symmetric(-step_size/denom * exp_avg, triuidx, p.data.shape)).data  
                     p.data = direction.mm(p.data)
                 elif isinstance(p, NoGDParameter):
                     p.data = p.grad.data.clone()
                 else:
-                    p.data.addcdiv_(-step_size, exp_avg, denom)
+                    p.data.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss

@@ -6,3 +6,4 @@ from .Layer_Nat import *
 from .Parameter import *
 from .Loss import *
 from .ParametricLoss import ParametricLoss
+from .AdaptiveLoss import Adaptive
