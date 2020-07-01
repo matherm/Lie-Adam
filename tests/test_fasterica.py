@@ -8,6 +8,7 @@ def nice_assert_st(A, B):
 X = np.hstack([make_moons(n_samples=100)[0] for d in range(100)])
 X = X - X.mean()
 X = X / X.std()
+X = X.astype(np.float32)
 
 def test_whitening_cpu():
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(X).float())

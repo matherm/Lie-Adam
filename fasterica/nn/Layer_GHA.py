@@ -120,7 +120,7 @@ class HebbianLayer(nn.Module):
     
     def step(self, ep, lr, param_group):
         self.has_converged()
-        param_group['lr'] = lr / np.sqrt(1 + 1 + ep) 
+        # param_group['lr'] = lr / np.sqrt(1 + 1 + ep) 
 
     def forward(self, X):
         X = X - self.mean_

@@ -92,7 +92,7 @@ class FasterICA(nn.Module):
             self.G = Loss.Logcosh
             self.loss = lambda x : Loss.NegentropyLoss(x, self.G)
         elif loss == "negentropy_exp":
-            self.G = Loss.Exp(x)
+            self.G = Loss.Exp
             self.loss = lambda x : Loss.NegentropyLoss(x, self.G)
         elif loss == "negentropy_tanh":
             self.G = Loss.Tanh
@@ -110,16 +110,31 @@ class FasterICA(nn.Module):
                 if self.whiten:
                     self.optim = Adam_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
                                            {'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}])
+                                           {'params': self.loss.parameters(), "lr" : lr}], amsgrad=False)
                 else:
                     self.optim = Adam_Lie([{'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}])
+                                           {'params': self.loss.parameters(), "lr" : lr}], amsgrad=False)
             else:
                 if self.whiten:
                     self.optim = Adam_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
+                                           {'params': self.net.ica.parameters(), "lr" : lr}], amsgrad=False)
+                else:
+                    self.optim = Adam_Lie([{'params': self.net.ica.parameters(), "lr" : lr}], amsgrad=False)
+        elif self.optimitzer == "sgd":
+            if isinstance(self.G, nn.Module):
+                if self.whiten:
+                    self.optim = SGD_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
+                                           {'params': self.net.ica.parameters(), "lr" : lr},
+                                           {'params': self.loss.parameters(), "lr" : lr}])
+                else:
+                    self.optim = SGD_Lie([{'params': self.net.ica.parameters(), "lr" : lr},
+                                           {'params': self.loss.parameters(), "lr" : lr}])
+            else:
+                if self.whiten:
+                    self.optim = SGD_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
                                            {'params': self.net.ica.parameters(), "lr" : lr}])
                 else:
-                    self.optim = Adam_Lie([{'params': self.net.ica.parameters(), "lr" : lr}])
+                    self.optim = SGD_Lie([{'params': self.net.ica.parameters(), "lr" : lr}])
         else:
             gens = itertools.chain()
             gens = itertools.chain(gens,  self.net.ica.parameters())
@@ -192,7 +207,7 @@ class FasterICA(nn.Module):
         if bs == "auto":
             bs = self.n_components
 
-        if bs < self.n_components and self.whiten:
+        if bs < self.n_components and self.whiten and self.whitening_strategy == "batch":
             raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={self.n_components}")
         
         if isinstance(dataloader, np.ndarray):
