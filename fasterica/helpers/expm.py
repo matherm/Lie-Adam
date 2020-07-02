@@ -34,12 +34,15 @@ class expm_class(torch.autograd.Function):
         (A,) = ctx.saved_tensors
         return expm_class._expm_frechet(A.t(), G)
 
-expm = expm_class.apply
 
 def expm_caley(A):
     """
     Caley-Approximation for expm(A).
     """
-    I = torch.eye_like(A)
+    I = torch.eye(A.shape[0], device=A.device, dtype=A.dtype)
     theta = A/2
-    return torch.inv(I - theta) @ (I + theta)
+    return torch.inverse(I - theta) @ (I + theta)
+
+
+# expm = expm_class.apply
+expm = expm_caley
