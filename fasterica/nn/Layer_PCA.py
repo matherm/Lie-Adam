@@ -1,4 +1,4 @@
-import torch 
+import torch, warnings
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
@@ -9,7 +9,7 @@ from ..helpers import *
 
 class F_Batch_PCA(Function):
     """
-    https://github.com/scikit-learn/scikit-learn/blob/483cd3eaa/sklearn/decomposition/_incremental_pca.py
+    Adopted from https://github.com/scikit-learn/scikit-learn/blob/483cd3eaa/sklearn/decomposition/_incremental_pca.py
     """
 
     @staticmethod
@@ -27,10 +27,11 @@ class F_Batch_PCA(Function):
         n_components_ = weight.shape[0]
         n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
 
-        if n_components_ > len(inpt):
-            raise ValueError(f"n_components={n_components_} must be less or equal to the batch number of samples {len(inpt)}")
 
         if n_samples_seen_ <= ds_size and updating > 0.:
+
+            if n_components_ > len(inpt):
+                warnings.warn(f"Skipping backward(). n_components={n_components_} must be less or equal to the batch number of samples {len(inpt)}")
 
             col_mean, col_var, n_total_samples =  incremental_mean_and_var(
                                                                 inpt, last_mean=mean_, last_variance=var_,
