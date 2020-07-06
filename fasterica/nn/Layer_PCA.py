@@ -47,7 +47,8 @@ class F_Batch_PCA(Function):
 
             # Update
             device = inpt.device
-            U, S, V = torch.svd(inpt, some=True) # svd returns V instead of numpy-ish V.T
+            # U, S, V = torch.svd(inpt, some=True) # svd returns V instead of numpy-ish V.T
+            U, S, V = torch.svd_lowrank(inpt, q=min(inpt.shape))
             U, S, V = U.to(device), S.to(device), V.to(device) 
             U, V =  svd_flip(U, V.T)
             explained_variance = S ** 2 / (n_total_samples - 1) 
