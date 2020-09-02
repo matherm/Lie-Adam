@@ -202,6 +202,11 @@ class FasterICA(nn.Module):
             return self.transform(torch.from_numpy(X)).cpu().numpy()
         return self.net(X).detach()
 
+    def forward(self, X):
+        if not torch.is_tensor(X):
+            return self.forward(torch.from_numpy(X)).cpu().numpy()
+        return self.net(X)
+
     def _prepare_input(self, dataloader, validation_loader, bs):
 
         if bs == "auto":
