@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import itertools
 import scipy
+import collections
 from tqdm import tqdm
 from fasterica import *
 
@@ -45,6 +46,9 @@ class FasterICA(nn.Module):
 
         if whitening_strategy == "GHA":
             optimistic_whitening_rate = 1.0
+
+        self.d = None
+        self.sigma_residuals = None
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.n_components = n_components
@@ -194,6 +198,22 @@ class FasterICA(nn.Module):
     def explained_variance_(self):
         return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
+    @property
+    def cov_sigma(self):
+        total_var = self.var.sum()
+        explain_var = self.explained_variance_.sum()
+        d, k = self.d, self.components_
+        sigma =  1 / (d-m) * (total_var - explain_var) 
+        return sigma
+
+    @property
+    def mu(self):
+        return self.net.whiten.mean_.data.detach().cpu().numpy()
+
+    @property
+    def var(self):
+        return self.net.whiten.var_.data.detach().cpu().numpy()
+
     def grad(self):
         if self.net is None:
             return 0.
@@ -204,22 +224,76 @@ class FasterICA(nn.Module):
 
     def transform(self, X):
         if not torch.is_tensor(X):
-            return self.transform(torch.from_numpy(X)).cpu().numpy()
+            return self.transform(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
-        return self.net(X.to(device)).detach()
+        return self.net(X.to(device))
 
     def forward(self, X):
         if not torch.is_tensor(X):
-            return self.forward(torch.from_numpy(X)).cpu().numpy()
+            return self.forward(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
         return self.net(X.to(device))
+
+    def predict(self, X):
+        """
+        Compresses the input.
+        """
+        if not torch.is_tensor(X):
+            X_, z = self.predict(torch.FloatTensor(X))
+            return X_.cpu().numpy(), z.cpu().numpy()
+        A = torch.FloatTensor(self.unmixing_matrix).to(X.device)
+        A_ = torch.FloatTensor(self.mixing_matrix).to(X.device)
+        mu = torch.FloatTensor(self.mu).to(X.device)
+        z = (X - mu) @ A 
+        X_ = (z @ A_) + mu
+        return X_, z
+
+    def elbo(self, X):
+        """
+        Short deviation of the Evidence lower bound (ELBO).
+
+        log p(x;\theta) = KL(q(z)|p(z|x;\theta)) + ELBO
+        ELBO = - KL(q(z)|p(x,z;\theta))
+             = - ( E_q_z[log q(z)] - E_q_z[log p(x,z;\theta)])
+             = - E_q_z[log q(z)] + E_q_z[log p(x,z;\theta)])
+             = E_q_z[log p(x,z;\theta)]) - E_q_z[log q(z)]
+             = E_q[log p(z,x)] - E_q[log q]      # Expected complete log likelihood - neg. entropy
+             = E_q[log p(x|z)] - KL[q(z)|p(z)]   
+             = E_q[log p(x|z)] - CE(q(z)|p(z) - H[q])
+             = E_q[log p(x|z)] - CE(q(z|x)|p(z)) + H_q_theta[q(z)]
+             = E_q[log p(x|z)] + E_q[log p(z)] - E_q[log q(z)] 
+
+        Model:
+            p(x) ~ Normal(mu, A^TA + Diag*\sigma)
+            p(x|z) ~ Normal(Az+mu, 1)
+            p(z) ~ LogCosh()
+            q(z) ~ Normal(0, 1)
+
+        Args:
+            X (b, d) : The data matrix
+
+        Returns:
+            ELBO (b) : elbo <= p(x) per datapoint 
+        """
+        if not torch.is_tensor(X):
+            return self.elbo(torch.from_numpy(X)).cpu().detach().numpy()
+        d, k = self.d, self.n_components
+        X_, z = self.predict(X)
+        log_px_z = torch.distributions.Normal(X.flatten(), self.sigma_residuals.repeat(len(X))).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        log_pz_z = Loss.ExpNormalized(z).sum(1)
+        H_qz_q = entropy_gaussian(np.eye(k))
+        elbo = log_px_z + log_pz_z + H_qz_q
+        return elbo
+
+    def bpd(self, X):
+        return -self.elbo(X) / (np.log(2) * self.d)
 
     def score_norm(self, X, ord=0.5):
         if not torch.is_tensor(X):
             return self.score_norm(torch.from_numpy(X)).cpu().numpy()
         device = next(self.parameters()).device
         s = self.transform(X.to(device))
-        return np.norm(s, axis=1, ord=ord)
+        return torch.norm(s, dim=1, p=ord)
     
     def score(self, X, ord=0.5):
         if not torch.is_tensor(X):
@@ -229,7 +303,7 @@ class FasterICA(nn.Module):
         return self.loss(s).mean(1)
     
     def _prepare_input(self, dataloader, validation_loader, bs):
-
+        
         if bs == "auto":
             bs = self.n_components
 
@@ -253,6 +327,10 @@ class FasterICA(nn.Module):
             if not isinstance(validation_loader, torch.utils.data.DataLoader):   
                 validation_loader = FastTensorDataLoader(tensors, batch_size=bs)
 
+        # seems to be the shortest way to find out the data dimension of a dataloader
+        for dat in validation_loader:
+            self.d = dat[0].shape[1]
+            break
         return dataloader, validation_loader
 
     def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs="auto", logging=-1):
@@ -273,7 +351,7 @@ class FasterICA(nn.Module):
                 data, label = batch[0].to(self.device), None
                 
                 if self.net is None: 
-                    self.reset(data.shape[1], dataset_size, lr)
+                    self.reset(self.d, dataset_size, lr)
                 
                 self.optim.zero_grad()
                 output = self.net(data)
@@ -312,5 +390,17 @@ class FasterICA(nn.Module):
             train_loss = fit(ep)
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
+        
+        def residuals_variance():
+            mean_, var_, n_samples_seen_ = 0, 0, torch.FloatTensor([0])
+            for batch in validation_loader:  
+                data, label = batch[0].to(self.device), None
+                data_, z = self.predict(data)
+                residuals = data - data_
+                mean_, var_, n_samples_seen_ =  incremental_mean_and_var(
+                                                        residuals.cpu(), last_mean=mean_, last_variance=var_,
+                                                        last_sample_count=n_samples_seen_)
+            return var_
+        self.sigma_residuals = torch.sqrt(residuals_variance()).flatten()
 
         return self.history

@@ -29,6 +29,10 @@ class SpatialICA(FasterICA):
         self.i2col = lambda X: torch.FloatTensor(
                                     im2col(X.reshape(len(X), *shape).cpu().numpy(), BSZ=self.BSZ, padding=self.padding, stride=self.stride).T
                                 ).to(X.device)
+
+        self.col2i = lambda X,len_X: torch.FloatTensor(
+                                    col2im(BSZ=self.BSZ, agg="avg", cols=X.cpu().numpy().T, x_shape=(len_X, *shape), padding=self.padding, stride=self.stride)
+                                ).to(X.device)
     
     def transform(self, X):
         """
@@ -66,6 +70,42 @@ class SpatialICA(FasterICA):
         """
         s = self.transform(X)
         return self.loss(s).mean(1)
+
+    def predict(self, X):
+        """
+        Compresses the input.
+        """
+        if not torch.is_tensor(X):
+            X_, z = self.predict(torch.FloatTensor(X))
+            return X_.cpu().numpy(), z.cpu().numpy()
+        if X.shape[1] > self.d:
+            X = self.i2col(X)
+        return super().predict(X)
+
+    def elbo(self, X):
+        """
+        Elbo computation for spatial ICA. See ``FasterICA.elbo()`` for the derivation.
+        """
+        if not torch.is_tensor(X):
+            return self.elbo(torch.from_numpy(X)).cpu().detach().numpy()
+        n, d, k = len(X), self.d, self.n_components
+
+        X = self.i2col(X)
+        X_, z = super().predict(X)
+        assert len(X_) == len(X)
+        log_px_z = torch.distributions.Normal(X.flatten(), self.sigma_residuals.repeat(len(X))).log_prob(X_.flatten()).reshape(len(X), -1)
+        log_px_z = self.col2i(log_px_z, n)
+        log_px_z = log_px_z.reshape(n, -1).sum(1)
+
+        log_pz_z = Loss.ExpNormalized(z)[im2colOrder(len(X), len(z))]
+        log_pz_z = log_pz_z.reshape(n, -1).sum(1) 
+        
+        H_qz_q = entropy_gaussian(np.eye(k))
+        elbo = log_px_z + log_pz_z + H_qz_q
+        return elbo
+
+    def bpd(self, X):
+        return -self.elbo(X) / (np.log(2) * self.d)
         
     def forward(self, X):
         """

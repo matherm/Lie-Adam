@@ -77,8 +77,21 @@ def test_properties_batch():
     ica.sphering_matrix
     ica.explained_variance_
 
+def test_bpd():
+    ica = FasterICA(n_components=2,  optimistic_whitening_rate=1.0, whitening_strategy="batch")    
+    ica.fit(X, 1)
+    ica.bpd(X)
+
 if __name__ == "__main__":
 
     test_whitening_cpu()
     test_whitening_cuda()
+    test_whitening_numpy()
+    test_whitening_dataloader()
+    test_whitening_tensor()
     test_whitening_tensor_optimistic()
+    test_whitening_tensor_gha()
+    test_properties_gha()
+    test_properties_batch()
+    test_bpd()
+    
