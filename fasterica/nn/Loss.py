@@ -54,7 +54,7 @@ class Loss():
     def LogcoshNormalized(x):
         """is log-probability
         """
-        return 2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi)
+        return -2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi)
 
     @staticmethod
     def ExpNormalized(x):
@@ -87,7 +87,7 @@ class Loss():
         
         Loss.GAMMA = Loss.GAMMA.to(S.device)     
         E_G_z = G_fun(S).mean(0) 
-        E_G_g = G_fun(Loss.GAMMA).mean(0) 
+        E_G_g = G_fun(Loss.GAMMA.repeat((1, S.shape[1]))).mean(0) 
  
         J_z = (E_G_z - E_G_g)**2
         

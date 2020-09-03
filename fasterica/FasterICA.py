@@ -60,22 +60,22 @@ class FasterICA(nn.Module):
         self.K = torch.ones(n_components)
         if loss == "logcosh":
             self.G = Loss.Logcosh
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "neglogcosh":
             self.G = lambda x : -Loss.Logcosh(x)
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "exp":
             self.G = Loss.Exp
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "negexp":
             self.G = lambda x : -Loss.Exp(x)
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "tanh":
             self.G = Loss.Tanh
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "parametric":
             self.G = ParametricLoss(n_components) 
-            self.loss = lambda x: -self.G(x)      # negative log-probability
+            self.loss = lambda x: -self.G(x)      
         elif loss == "nnica":
             self.G = Loss.NNICA
             self.loss = lambda x : Loss.NegentropyLoss(x, self.G)
@@ -97,9 +97,12 @@ class FasterICA(nn.Module):
         elif loss == "negentropy_tanh":
             self.G = Loss.Tanh
             self.loss = lambda x : Loss.NegentropyLoss(x, self.G)
+        elif loss == "ISA":
+            self.G = ISA(n_components, 16, layout="topogrid")
+            self.loss = lambda x : self.G(x)
         elif callable(loss):
             self.G = loss
-            self.loss = lambda x : -self.G(x)  # negative log-probability 
+            self.loss = lambda x : -self.G(x)   
         else:
             raise ValueError(f"loss={loss} not understood.")
 
@@ -110,10 +113,10 @@ class FasterICA(nn.Module):
                 if self.whiten:
                     self.optim = Adam_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
                                            {'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}], amsgrad=False)
+                                           {'params': self.G.parameters(), "lr" : lr}], amsgrad=False)
                 else:
                     self.optim = Adam_Lie([{'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}], amsgrad=False)
+                                           {'params': self.G.parameters(), "lr" : lr}], amsgrad=False)
             else:
                 if self.whiten:
                     self.optim = Adam_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
@@ -125,10 +128,10 @@ class FasterICA(nn.Module):
                 if self.whiten:
                     self.optim = SGD_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
                                            {'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}])
+                                           {'params': self.G.parameters(), "lr" : lr}])
                 else:
                     self.optim = SGD_Lie([{'params': self.net.ica.parameters(), "lr" : lr},
-                                           {'params': self.loss.parameters(), "lr" : lr}])
+                                           {'params': self.G.parameters(), "lr" : lr}])
             else:
                 if self.whiten:
                     self.optim = SGD_Lie([{'params': self.net.whiten.parameters(), "lr" : lr},
@@ -195,13 +198,36 @@ class FasterICA(nn.Module):
         if self.net is None:
             return 0.
         grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.grad is not None and w.requires_grad]
+        if len(grad) == 0:
+            return 0.
         return torch.cat(grad).flatten().clone()
 
     def transform(self, X):
         if not torch.is_tensor(X):
             return self.transform(torch.from_numpy(X)).cpu().numpy()
-        return self.net(X).detach()
+        device = next(self.parameters()).device
+        return self.net(X.to(device)).detach()
 
+    def forward(self, X):
+        if not torch.is_tensor(X):
+            return self.forward(torch.from_numpy(X)).cpu().numpy()
+        device = next(self.parameters()).device
+        return self.net(X.to(device))
+
+    def score_norm(self, X, ord=0.5):
+        if not torch.is_tensor(X):
+            return self.score_norm(torch.from_numpy(X)).cpu().numpy()
+        device = next(self.parameters()).device
+        s = self.transform(X.to(device))
+        return np.norm(s, axis=1, ord=ord)
+    
+    def score(self, X, ord=0.5):
+        if not torch.is_tensor(X):
+            return self.score(torch.FloatTensor(X)).cpu().numpy()
+        device = next(self.parameters()).device
+        s = self.net(X).to(device)
+        return self.loss(s).mean(1)
+    
     def _prepare_input(self, dataloader, validation_loader, bs):
 
         if bs == "auto":
