@@ -82,6 +82,13 @@ class SpatialICA(FasterICA):
             X = self.i2col(X)
         return super().predict(X)
 
+    def reconstruct(self, X):
+        if not torch.is_tensor(X):
+            return self.reconstruct(torch.from_numpy(X)).cpu().detach().numpy()
+        patches, z = self.predict(X)
+        X_ = self.col2i(patches, len(X)).reshape(len(X), -1)
+        return X_
+
     def elbo(self, X):
         """
         Elbo computation for spatial ICA. See ``FasterICA.elbo()`` for the derivation.
@@ -92,7 +99,7 @@ class SpatialICA(FasterICA):
 
         X = self.i2col(X)
         X_, z = super().predict(X)
-        assert len(X_) == len(X)
+
         log_px_z = torch.distributions.Normal(X.flatten(), self.sigma_residuals.repeat(len(X))).log_prob(X_.flatten()).reshape(len(X), -1)
         log_px_z = self.col2i(log_px_z, n)
         log_px_z = log_px_z.reshape(n, -1).sum(1)
@@ -100,7 +107,9 @@ class SpatialICA(FasterICA):
         log_pz_z = Loss.ExpNormalized(z)[im2colOrder(len(X), len(z))]
         log_pz_z = log_pz_z.reshape(n, -1).sum(1) 
         
-        H_qz_q = entropy_gaussian(np.eye(k))
+        n_tiles = len(X) // n
+        H_qz_q = entropy_gaussian(np.eye(k*n_tiles))
+        H_qz_q = -torch.distributions.Normal(0, 1).log_prob(z).reshape(n, -1).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
         return elbo
 

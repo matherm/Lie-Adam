@@ -282,6 +282,7 @@ class FasterICA(nn.Module):
         log_px_z = torch.distributions.Normal(X.flatten(), self.sigma_residuals.repeat(len(X))).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
         log_pz_z = Loss.ExpNormalized(z).sum(1)
         H_qz_q = entropy_gaussian(np.eye(k))
+        H_qz_q = -torch.distributions.Normal(0, 1).log_prob(z).reshape(-1, k).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
         return elbo
 
