@@ -43,25 +43,59 @@ class Loss():
     def Exp(x, a2=0.99):
         """is proportional log-probability
         """
-        # hat 
         return -torch.exp(-a2/2*x**2)/a2
 
     @staticmethod
     def Tanh(x):
         return torch.tanh(x)
 
+
+    @staticmethod
+    def Hyper(x):
+        """is log-probability
+        """  
+        # hat
+        sech = lambda x: 1/torch.cosh(x)
+        p = lambda x: 0.5*sech(x*np.pi/2)
+        return torch.log(p(x))
+
+    @staticmethod
+    def Laplace(x):
+        """is log-probability
+        """
+        # hat
+        return torch.log(0.5*torch.exp(-torch.abs(x)))
+
+    @staticmethod
+    def TemporalHyper(x, n_channels=43):
+        """is log-probability
+        Natural Image Statistics (10.12)
+        shape (B, Channels*Pixels)
+        """
+        x = x.view(len(x), n_channels, -1)
+        p_spatial = 2/(np.pi*3)*torch.exp(-np.sqrt(3)*torch.sqrt((x**2).sum(2)))
+        log_p_channel = torch.log(p_spatial).sum(1)
+        return log_p_channel
+
     @staticmethod
     def LogcoshNormalized(x):
         """is log-probability
         """
-        return -2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi)
+        # hat
+        return -2*torch.log(torch.cosh(np.pi/(2*np.sqrt(3))*x)) - 4*np.sqrt(3)/(np.pi) + np.sqrt(2)
 
     @staticmethod
     def ExpNormalized(x):
         """is log-probability
         """
         # hat
-        return -torch.exp(-np.sqrt(2)*torch.abs(x))/np.sqrt(2)
+        return torch.log(torch.exp(-np.sqrt(2)*torch.abs(x))/np.sqrt(2))
+
+    @staticmethod
+    def Gaussian(x):
+        """is log-probability
+        """
+        return torch.distributions.Normal(0, 1).log_prob(x.flatten()).view(x.shape)
 
     @staticmethod
     def FrobCov(S):

@@ -186,10 +186,6 @@ class FasterICA(nn.Module):
         return np.linalg.pinv(self.unmixing_matrix)
 
     @property
-    def components_(self):
-        return self.net.ica.components_.detach().cpu().numpy()
-
-    @property
     def sphering_matrix(self, numpy=True):
         W_white = self.net.whiten.sphering_matrix 
         return W_white.cpu().detach().numpy()
@@ -202,8 +198,11 @@ class FasterICA(nn.Module):
     def cov_sigma(self):
         total_var = self.var.sum()
         explain_var = self.explained_variance_.sum()
-        d, k = self.d, self.components_
-        sigma =  1 / (d-m) * (total_var - explain_var) 
+        d, k = self.d, self.n_components
+        if d - k > 0:
+            sigma =  1 / (d-k) * (total_var - explain_var) 
+        else:
+            sigma = 0.
         return sigma
 
     @property
@@ -248,20 +247,60 @@ class FasterICA(nn.Module):
         X_ = (z @ A_) + mu
         return X_, z
 
-    def elbo(self, X):
+
+    def set_residuals_std(self, X):
+        """
+        Computes the residuals for the ELBO estimation.
+        """
+        mean_, var_, n_samples_seen_ = 0, 0, torch.FloatTensor([0])
+        loader = torch.utils.data.DataLoader(torch.utils.data.dataset.TensorDataset(torch.FloatTensor(X)), batch_size=1000)
+        for batch in loader:  
+            data = batch[0].to(self.device)
+            data_, z = self.predict(data)
+            residuals = data - data_
+            mean_, var_, n_samples_seen_ =  incremental_mean_and_var(
+                                                    residuals.cpu(), last_mean=mean_, last_variance=var_,
+                                                    last_sample_count=n_samples_seen_)
+        self.sigma_residuals = torch.sqrt(var_).flatten()
+
+
+    def log_prob(self, X):
+        """
+        Computes the log probabiliy based on probabilistic PCA.
+        """
+        if torch.is_tensor(X):
+                return torch.FloatTensor(self.log_prob(X.cpu().numpy())).to(X.device)
+        n, d, k = len(X), self.d, self.n_components
+        logdet = lambda A : torch.logdet(torch.FloatTensor(A)).numpy()
+        X = X - self.mu
+
+        W = self.net.whiten.weight.detach().cpu().numpy().T
+        # Compute covariance and inverse
+        C = (W @ np.diag(self.explained_variance_) @ W.T) + np.eye(d) * self.cov_sigma
+        C_inv  = np.linalg.pinv(C)  # d x d
+        
+        # Malahanobis
+        M = X @ C_inv @ X.T
+        
+        return -0.5*M - 0.5*d*np.log(2*np.pi) - 0.5*logdet(C)
+
+    def elbo(self, X, p_z=Loss.ExpNormalized, sigma_eps=1e-5):
         """
         Short deviation of the Evidence lower bound (ELBO).
 
         log p(x;\theta) = KL(q(z)|p(z|x;\theta)) + ELBO
         ELBO = - KL(q(z)|p(x,z;\theta))
-             = - ( E_q_z[log q(z)] - E_q_z[log p(x,z;\theta)])
-             = - E_q_z[log q(z)] + E_q_z[log p(x,z;\theta)])
-             = E_q_z[log p(x,z;\theta)]) - E_q_z[log q(z)]
-             = E_q[log p(z,x)] - E_q[log q]      # Expected complete log likelihood - neg. entropy
-             = E_q[log p(x|z)] - KL[q(z)|p(z)]   
-             = E_q[log p(x|z)] - CE(q(z)|p(z) - H[q])
-             = E_q[log p(x|z)] - CE(q(z|x)|p(z)) + H_q_theta[q(z)]
-             = E_q[log p(x|z)] + E_q[log p(z)] - E_q[log q(z)] 
+            = - ( E_q_z[log q(z)] - E_q_z[log p(x,z;\theta)])
+            = - E_q_z[log q(z)] + E_q_z[log p(x,z;\theta)])
+            = E_q_z[log p(x,z;\theta)]) - E_q_z[log q(z)]
+            = E_q[log p(z,x)] - E_q[log q]      # Expected complete log likelihood - neg. entropy
+            = E_q[log p(x|z)] - KL[q(z)|p(z)]   
+            = E_q[log p(x|z)] - CE(q(z)|p(z) - H[q])
+            = E_q[log p(x|z)] - CE(q(z|x)|p(z)) + H_q_theta[q(z)]
+            = E_q[log p(x|z)] + E_q[log p(z)] - E_q[log q(z)] 
+
+        In EM-Algorithm:
+            q(z) = p(z|x) = point-estimates at the training-points. For The Entropy-Term, we need another Model for q(z) = N(0,1) or 1/N \sum N(z_i,var(z_i))
 
         Model:
             p(x) ~ Normal(mu, A^TA + Diag*\sigma)
@@ -276,18 +315,78 @@ class FasterICA(nn.Module):
             ELBO (b) : elbo <= p(x) per datapoint 
         """
         if not torch.is_tensor(X):
-            return self.elbo(torch.from_numpy(X)).cpu().detach().numpy()
+            return self.elbo(torch.from_numpy(X), p_z, sigma_eps).cpu().detach().numpy()
         d, k = self.d, self.n_components
         X_, z = self.predict(X)
-        log_px_z = torch.distributions.Normal(X.flatten(), self.sigma_residuals.repeat(len(X))).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
-        log_pz_z = Loss.ExpNormalized(z).sum(1)
+        sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
+        log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        log_pz_z = p_z(z).sum(1)
         H_qz_q = entropy_gaussian(np.eye(k))
         H_qz_q = -torch.distributions.Normal(0, 1).log_prob(z).reshape(-1, k).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
-        return elbo
+        return -elbo
 
     def bpd(self, X):
         return -self.elbo(X) / (np.log(2) * self.d)
+
+    def bpd_pca_logit(self, X):
+        assert X.min() >= 0 and X.max() <= 1
+        dim = X.shape[1]
+        log_abs_inverval = -np.log(256)*dim
+        X, sldj = to_logit(X)
+        self.set_residuals_std(X)
+        elbo_X = self.log_prob(X) + log_abs_inverval + sldj
+        bpd_X = -elbo_X/(np.log(2) * dim)
+        return bpd_X
+
+    def bpd_pca_normal(self, X, mean, std):
+        """
+        # log determinant of jacobean
+        # [0 , 255] # -128 --> [-128, 128] --> 0
+        # [-128, 128] # /128 --> [-1, 1] --> np.log(1/128)*dim
+        # np.log(1/128)*dim = dim*(log(1) - log(128)) = -dim*log(128)
+
+        # p(x) = p(f^-1(x))|det df f^-1(x)|
+        # log p(x) = log p(z) + log_det_J # Division is minus
+        """
+        assert X.min() >= 0 and X.max() <= 1
+        dim = X.shape[1]
+        log_abs_inverval = -np.log(256)*dim
+        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
+        if type(np.asarray(std)) == numpy.ndarray:
+            log_abs_scale = -np.log(std).sum()
+        else:
+            log_abs_scale = -np.log(std)*dim
+        X = (X - mean) / std
+        self.set_residuals_std(X)
+        elbo_X = self.log_prob(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
+        bpd_X = -elbo_X/(np.log(2) * dim)
+        return bpd_X
+
+    def bpd_ica_normal(self, X, mean, std):
+        assert X.min() >= 0 and X.max() <= 1
+        dim = X.shape[1]
+        log_abs_inverval = -np.log(256)*dim
+        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
+        if type(np.asarray(std)) == numpy.ndarray:
+            log_abs_scale = -np.log(std).sum()
+        else:
+            log_abs_scale = -np.log(std)*dim        
+        X = (X - mean) / std
+        self.set_residuals_std(X)
+        elbo_X = self.elbo(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
+        bpd_X = -elbo_X/(np.log(2) * dim)
+        return bpd_X
+
+    def bpd_ica_logit(self, X):
+        assert X.min() >= 0 and X.max() <= 1
+        dim = X.shape[1]
+        log_abs_inverval = -np.log(256)*dim
+        X, sldj = to_logit(X)
+        self.set_residuals_std(X)
+        elbo_X = self.elbo(X) + log_abs_inverval + sldj
+        bpd_X = -elbo_X/(np.log(2) * dim)
+        return bpd_X
 
     def score_norm(self, X, ord=0.5):
         if not torch.is_tensor(X):
@@ -392,16 +491,6 @@ class FasterICA(nn.Module):
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
         
-        def residuals_variance():
-            mean_, var_, n_samples_seen_ = 0, 0, torch.FloatTensor([0])
-            for batch in validation_loader:  
-                data, label = batch[0].to(self.device), None
-                data_, z = self.predict(data)
-                residuals = data - data_
-                mean_, var_, n_samples_seen_ =  incremental_mean_and_var(
-                                                        residuals.cpu(), last_mean=mean_, last_variance=var_,
-                                                        last_sample_count=n_samples_seen_)
-            return var_
-        self.sigma_residuals = torch.sqrt(residuals_variance()).flatten()
+        self.set_residuals_std(X)
 
         return self.history
