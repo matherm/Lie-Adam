@@ -19,11 +19,11 @@ def read_version(fname):
         raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
     return verstr
 
-__version__ = read_version("fasterica/__version__.py")
+__version__ = read_version("hugeica/__version__.py")
 
 setup(
-      name = 'fasterica',
-      description= "IOS FasterICA",
+      name = 'hugeica',
+      description= "HugeICA",
       author = 'Copyright (C) 2020 Matthias Hermann & Matthias O. Franz, IOS Konstanz',
       author_email = 'Matthias.Hermann@htwg-konstanz.de',
       version = __version__,

@@ -1,4 +1,4 @@
-from fasterica import *
+from hugeica import *
 from sklearn.datasets import make_moons, load_digits
 
 def nice_assert_st(A, B):

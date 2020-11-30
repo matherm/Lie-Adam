@@ -5,7 +5,7 @@ import itertools
 import scipy
 import collections
 from tqdm import tqdm
-from fasterica import *
+from hugeica import *
 
 class Net(nn.Module):
 
@@ -20,6 +20,8 @@ class Net(nn.Module):
                 
         if derivative == "lie":
             self.ica    = SO_Layer(n_components)
+        elif derivative == "relativeso":
+            self.ica    = Relative_SOGradient(n_components, fun)
         elif derivative == "relative":
             self.ica    = Relative_Gradient(n_components, fun)
         else:
@@ -33,12 +35,12 @@ class Net(nn.Module):
     def forward(self, X):
         return self.layers(X)
         
-class FasterICA(nn.Module):
+class HugeICA(nn.Module):
 
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="exp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False):
+    def __init__(self, n_components, whiten=True, loss="negexp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False):
         super().__init__()
 
         if whitening_strategy not in ["GHA", "batch"]:
@@ -191,6 +193,16 @@ class FasterICA(nn.Module):
         return W_white.cpu().detach().numpy()
 
     @property
+    def components(self, numpy=True):
+        W = self.net.whiten.components 
+        return W.cpu().detach().numpy()
+
+    @property
+    def rotation_matrix(self, numpy=True):
+        W_rot = self.net.ica.components_.T 
+        return W_rot.cpu().detach().numpy()
+
+    @property
     def explained_variance_(self):
         return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
@@ -233,7 +245,7 @@ class FasterICA(nn.Module):
         device = next(self.parameters()).device
         return self.net(X.to(device))
 
-    def predict(self, X):
+    def predict(self, X, sample_scale=0.):
         """
         Compresses the input.
         """
@@ -244,8 +256,13 @@ class FasterICA(nn.Module):
         A_ = torch.FloatTensor(self.mixing_matrix).to(X.device)
         mu = torch.FloatTensor(self.mu).to(X.device)
         z = (X - mu) @ A 
-        X_ = (z @ A_) + mu
-        return X_, z
+        if sample_scale > 0.:
+            z_ = torch.distributions.Normal(z.flatten(), sample_scale).sample((1,)).view(z.shape)
+            X_ = (z_ @ A_) + mu
+            return X_, z, z_
+        else:
+            X_ = (z @ A_) + mu
+            return X_, z
 
 
     def set_residuals_std(self, X):
@@ -281,10 +298,11 @@ class FasterICA(nn.Module):
         
         # Malahanobis
         M = X @ C_inv @ X.T
+        M = M.sum(axis=1).flatten()
         
         return -0.5*M - 0.5*d*np.log(2*np.pi) - 0.5*logdet(C)
 
-    def elbo(self, X, p_z=Loss.ExpNormalized, sigma_eps=1e-5):
+    def elbo(self, X, p_z=Loss.ExpNormalized, sigma_eps=1e-5, sample_scale=0.):
         """
         Short deviation of the Evidence lower bound (ELBO).
 
@@ -317,12 +335,18 @@ class FasterICA(nn.Module):
         if not torch.is_tensor(X):
             return self.elbo(torch.from_numpy(X), p_z, sigma_eps).cpu().detach().numpy()
         d, k = self.d, self.n_components
-        X_, z = self.predict(X)
+        if sample_scale > 0.:
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
+            H_qz_q = entropy_gaussian(np.eye(k))
+            H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(z.shape).reshape(-1, k).sum(1)
+        else:
+            X_, z = self.predict(X, sample_scale=sample_scale)
+            z_ = z
+            H_qz_q = 0.
+
         sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
         log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
-        log_pz_z = p_z(z).sum(1)
-        H_qz_q = entropy_gaussian(np.eye(k))
-        H_qz_q = -torch.distributions.Normal(0, 1).log_prob(z).reshape(-1, k).sum(1)
+        log_pz_z = p_z(z_).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
         return -elbo
 
@@ -491,6 +515,9 @@ class FasterICA(nn.Module):
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
         
-        self.set_residuals_std(X)
+        try:
+            self.set_residuals_std(X)
+        except:
+            print("Residuals cannot be computed when whiten=False")
 
         return self.history

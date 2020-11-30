@@ -86,6 +86,10 @@ class Batch_PCA_Layer(nn.Module):
         return self.weight.T.detach() / torch.sqrt(self.bias).detach()
 
     @property
+    def components(self):
+        return self.weight.T.detach()
+
+    @property
     def explained_variance_(self):
         return self.bias.detach()
     

@@ -1,9 +1,9 @@
 import torchvision
 import numpy as np
 import matplotlib.pyplot as plt
-from fasterica import *
+from hugeica import *
 
-print("Fasterica version:", version)
+print("HugeICA version:", version)
 
 stl = torchvision.datasets.STL10("./data", split='train+unlabeled', folds=None, transform=torchvision.transforms.ToTensor(), target_transform=None, download=True)
 X = np.vstack([stl[i][0].view(1, -1).numpy() for i in range(0, len(stl) )])
@@ -22,7 +22,7 @@ dataloadert  = FastTensorDataLoader(tensors, batch_size=50)
 tensors = torch.from_numpy(X_val).float(), torch.empty(len(X_val))
 dataloaderv  = FastTensorDataLoader(tensors, batch_size=50)
 
-ica = FasterICA(n_components=256, whitening_strategy="GHA")
+ica = HugeICA(n_components=256, whitening_strategy="GHA")
 
 print("Fitting data shape", X.shape, "on", ica.device)
 ica.fit(dataloadert, 10, dataloaderv)

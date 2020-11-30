@@ -1,4 +1,10 @@
 import torch
+import numpy as np
+
+def sum_of_diff(X, axis=1):
+    if torch.is_tensor(X):
+        return torch.FloatTensor(sum_of_diff(X.cpu().detach().numpy(), axis)).to(X.device)
+    return np.diff(X, axis=axis).sum(axis)
 
 def incremental_mean_and_var(X, last_mean, last_variance, last_sample_count):
     """ 

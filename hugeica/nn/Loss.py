@@ -51,6 +51,16 @@ class Loss():
 
 
     @staticmethod
+    def RightSkew(x, a=1):
+        """
+        http://azzalini.stat.unipd.it/SN/skew-prop-aism.pdf
+        Skewish log propability density function
+        """
+        gauss = torch.distributions.Normal(0,1)
+        return np.log(2) + gauss.log_prob(x)  + torch.log(gauss.cdf(a*x))
+        #return np.log(2) + gauss.log_prob(x)  + gauss.log_prob(a*x)
+
+    @staticmethod
     def Hyper(x):
         """is log-probability
         """  
@@ -72,6 +82,7 @@ class Loss():
         Natural Image Statistics (10.12)
         shape (B, Channels*Pixels)
         """
+        raise NotImplementedError()
         x = x.view(len(x), n_channels, -1)
         p_spatial = 2/(np.pi*3)*torch.exp(-np.sqrt(3)*torch.sqrt((x**2).sum(2)))
         log_p_channel = torch.log(p_spatial).sum(1)
@@ -118,7 +129,8 @@ class Loss():
         """
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
-        
+        S = S - S.mean()
+        S = S / S.std(0)
         Loss.GAMMA = Loss.GAMMA.to(S.device)     
         E_G_z = G_fun(S).mean(0) 
         E_G_g = G_fun(Loss.GAMMA.repeat((1, S.shape[1]))).mean(0) 

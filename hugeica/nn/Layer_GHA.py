@@ -115,6 +115,10 @@ class HebbianLayer(nn.Module):
         return W / self.online_var.std.detach()
 
     @property
+    def components(self):
+        return self.weight.T.detach()
+
+    @property
     def explained_variance_(self):
         return  self.online_var.std.detach()
     
