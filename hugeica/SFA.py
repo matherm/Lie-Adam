@@ -49,18 +49,21 @@ class SFA():
         if self.squared_change:
             S_change_score = S_change_score**2
           
-        self.sfa = HugeICA(self.slow_components)
+        self.sfa = HugeICA(self.n_components)
         self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=-1, lr=1e-2, bs=bs)
-        if self.mode == "slow":
-            self.T = self.sfa.components[:, -self.slow_components:]
-            self.change_variance_ = self.sfa.explained_variance_[-self.slow_components:]
-        if self.mode == "fast":
-            self.T = self.sfa.components[:, :self.slow_components]
-            self.change_variance_ = self.sfa.explained_variance_[-self.slow_components:]
         if self.mode == "none":
             assert self.slow_components == self.n_components
-            self.T = np.eye(self.n_components).astype(np.float32)
-            self.change_variance_ = self.sfa.var_
+            slow_idx = np.argsort(self.sfa.var)
+            self.T = np.eye(self.n_components).astype(np.float32)[:, slow_idx]
+            self.change_variance_ = self.sfa.var[slow_idx]
+        else:
+            slow_idx = np.argsort(self.sfa.explained_variance_)
+            if self.mode == "slow":
+                self.T = self.sfa.components[:, slow_idx[:self.slow_components]]
+                self.change_variance_ = self.sfa.explained_variance_[slow_idx[:self.slow_components]]
+            if self.mode == "fast":
+                self.T = self.sfa.components[:, slow_idx[-self.slow_components:]]
+                self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.slow_components:]]
 
         # Update the indepenendent components
         self.model.n_components = self.slow_components
@@ -68,7 +71,7 @@ class SFA():
 
 
     @staticmethod
-    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1]):
+    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=None):
 
         if epochs > 1:
             ica = True
@@ -114,7 +117,7 @@ class SFA():
                                             BSZ=(p, p), 
                                             stride=s, 
                                             n_components=c,
-                                            slow_components=c,
+                                            slow_components=c if remove_components is None else c - remove_components,
                                             ica = ica)
                             model.fit(X_, epochs, bs=bs)
 
@@ -154,8 +157,15 @@ class SFA():
     def bits_back_code(self, *args, **kwargs):
         return self.model.bits_back_code(*args, **kwargs)
 
-    def transform(self, X, agg="none", bs=-1, exponent=1, act=lambda x : x ):
-        return self.model.transform(X, agg=agg, bs=bs, exponent=exponent, act=act)
+    def transform(self, X, exponent=1, agg="none", bs=-1, act=lambda x : x):
+        return self.model.transform(X, exponent=exponent, agg=agg, bs=bs, act=act)
+
+    def martingale(self, X):
+        """
+        https://www.researchgate.net/publication/267629210_Testing_the_Martingale_Hypothesis
+        """
+        slope, inter = batch_regression(X)
+        return inter 
     
     def score(self, X, ord=1, abs=False, exp=1):
         if abs:

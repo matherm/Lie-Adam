@@ -250,8 +250,8 @@ class HugeICA(nn.Module):
         Compresses the input.
         """
         if not torch.is_tensor(X):
-            X_, z = self.predict(torch.FloatTensor(X))
-            return X_.cpu().numpy(), z.cpu().numpy()
+            X_, z_, z = self.predict(torch.FloatTensor(X), sample_scale=sample_scale)
+            return X_.cpu().numpy(), z_.cpu().numpy(), z.cpu().numpy()
         A = torch.FloatTensor(self.unmixing_matrix).to(X.device)
         A_ = torch.FloatTensor(self.mixing_matrix).to(X.device)
         mu = torch.FloatTensor(self.mu).to(X.device)
@@ -262,7 +262,7 @@ class HugeICA(nn.Module):
             return X_, z, z_
         else:
             X_ = (z @ A_) + mu
-            return X_, z
+            return X_, z, z
 
 
     def set_residuals_std(self, X):
@@ -273,7 +273,7 @@ class HugeICA(nn.Module):
         loader = torch.utils.data.DataLoader(torch.utils.data.dataset.TensorDataset(torch.FloatTensor(X)), batch_size=1000)
         for batch in loader:  
             data = batch[0].to(self.device)
-            data_, z = self.predict(data)
+            data_, z, z_ = self.predict(data)
             residuals = data - data_
             mean_, var_, n_samples_seen_ =  incremental_mean_and_var(
                                                     residuals.cpu(), last_mean=mean_, last_variance=var_,
@@ -515,9 +515,9 @@ class HugeICA(nn.Module):
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
         
-        try:
+        if self.whiten:
             self.set_residuals_std(X)
-        except:
+        else:
             print("Residuals cannot be computed when whiten=False")
-
+        
         return self.history

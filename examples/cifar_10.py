@@ -18,23 +18,23 @@ X_val = X / X.std()
 X = X - X.mean()  
 X = X / X.std()
 
-ica = HugeICA(n_components=100, whitening_strategy="batch", loss="tanh")    
-print("Fitting data shape", X.shape, "on", ica.device)
-ica.fit(X, 20, X_val, lr=1e-3, bs=1000, logging=1)
-show_filters_color( ica.mixing_matrix.T)
-plt.savefig("./cifar10-components-batch.png")
+#ica = HugeICA(n_components=100, whitening_strategy="batch", loss="tanh")    
+#print("Fitting data shape", X.shape, "on", ica.device)
+#ica.fit(X, 20, X_val, lr=1e-3, bs=1000, logging=1)
+#show_filters_color( ica.mixing_matrix.T)
+#plt.savefig("./cifar10-components-batch.png")
 
-ica = HugeICA(n_components=2, optimistic_whitening_rate=1.0, optimizer="adam", whitening_strategy="batch", derivative="relative", loss="tanh")    
+ica = HugeICA(n_components=10, optimistic_whitening_rate=1.0, optimizer="adam", whitening_strategy="batch", derivative="relative", loss="tanh")    
 print("Fitting data shape", X.shape, "on", ica.device)
-ica.fit(X, 1, X_val, lr=1e-3, bs=1000, logging=1)
+ica.fit(X, 1, X_val, lr=1e-2, bs=1000, logging=1)
 
 X = ica.transform(X)
 X_val = ica.transform(X_val)
 W_white = ica.sphering_matrix
 
-ica = HugeICA(n_components=2, whiten=False, optimistic_whitening_rate=0.5, optimizer="sgd", whitening_strategy="batch", derivative="relative", loss="tanh")    
+ica = HugeICA(n_components=10, whiten=False, optimistic_whitening_rate=0.5, optimizer="sgd", whitening_strategy="batch", derivative="relativeso", loss="tanh")    
 print("Fitting data shape", X.shape, "on", ica.device)
-ica.fit(X, 5000, X_val, lr=1e-3, bs=5000, logging=1)
+ica.fit(X, 20000, X_val, lr=1e-3, bs=len(X), logging=1)
 
 W_rot = ica.net.ica.components_.T.detach().cpu().numpy() 
 mixing = W_white @ W_rot

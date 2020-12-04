@@ -57,7 +57,8 @@ class SpatialICA(HugeICA):
         n_components = self.n_components
         if bs < 0:
             bs = len(X)
-        sup_transform = super().transform # see: https://stackoverflow.com/questions/59520967/super-keyword-doesnt-work-properly-in-list-comprehension
+        # see: https://stackoverflow.com/questions/59520967/super-keyword-doesnt-work-properly-in-list-comprehension
+        sup_transform = super().transform 
         s = torch.cat([sup_transform(X_[i:i+bs]) for i in range(0, len(X_), bs)], dim=0) # transform the patches
         s = torch.pow(s, exponent=exponent)
         s = act(s)
@@ -115,8 +116,8 @@ class SpatialICA(HugeICA):
         """
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
-            X_, z = self.predict(torch.FloatTensor(X).to(device), sample_scale)
-            return X_.cpu().numpy(), z.cpu().numpy()
+            X_, z, z_ = self.predict(torch.FloatTensor(X).to(device), sample_scale)
+            return X_.cpu().numpy(), z.cpu().numpy(), z_.cpu().numpy()
         if X.shape[1] > self.d:
             X = self.i2col(X)
         return super().predict(X, sample_scale)
@@ -139,17 +140,18 @@ class SpatialICA(HugeICA):
             return self.elbo(torch.FloatTensor(X).to(device), p_z, sigma_eps).cpu().detach().numpy()
         n, d, k = len(X), self.d, self.n_components
         n_tiles = len(X) // n
+        n_images = len(X)
 
         X = self.i2col(X)
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
-            z_ = z_[im2colOrder(len(X), len(z))]
+            z = z[im2colOrder(n_images, len(z))]
+            z_ = z_[im2colOrder(n_images, len(z))]
             H_qz_q = entropy_gaussian(np.eye(k*n_tiles))
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(n, -1).sum(1)
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
+            z = z[im2colOrder(n_images, len(z))]
             z_ = z
             H_qz_q = np.zeros(n)
 
@@ -173,18 +175,17 @@ class SpatialICA(HugeICA):
             device = next(self.parameters()).device
             return self.entropy(torch.FloatTensor(X).to(device), p_z, sigma_eps).cpu().detach().numpy()
         n, d, k = len(X), self.d, self.n_components
+        n_tiles = len(X) // n
+        n_images = len(X)
 
         X = self.i2col(X)
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
-            z_ = z_[im2colOrder(len(X), len(z))]
+            z = z[im2colOrder(n_images, len(z))]
+            z_ = z_[im2colOrder(n_images, len(z))]
             H_qz_q = entropy_gaussian(np.eye(k*n_tiles))
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(n, -1).sum(1)
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
-            z_ = z
             H_qz_q = np.zeros(n)
 
         return H_qz_q
@@ -195,27 +196,26 @@ class SpatialICA(HugeICA):
         """
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
-            return self.cross_entropy(torch.FloatTensor(X).to(device), p_z, sigma_eps).cpu().detach().numpy()
+            return self.cross_entropy(torch.FloatTensor(X).to(device), p_z, sigma_eps, sample_scale).cpu().detach().numpy()
         n, d, k = len(X), self.d, self.n_components
         n_tiles = len(X) // n
+        n_images = len(X)
 
         X = self.i2col(X)
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
-            z_ = z_[im2colOrder(len(X), len(z))]
-            H_qz_q = entropy_gaussian(np.eye(k*n_tiles))
-            H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(n, -1).sum(1)
+            z = z[im2colOrder(n_images, len(z))]
+            z_ = z_[im2colOrder(n_images, len(z))]
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
+            z = z[im2colOrder(n_images, len(z))]
             z_ = z
-            H_qz_q = np.zeros(n)
 
         X, X_, z, z_ = X.cpu(), X_.cpu(), z.cpu(), z_.cpu()
 
         log_pz_z = p_z(z_)
         log_pz_z = log_pz_z.reshape(n, -1).sum(1) # sum over timesteps
+        #print(n, -(log_pz_z.reshape(n, -1).sum(1).mean()))
         
         return -log_pz_z
 
@@ -228,14 +228,15 @@ class SpatialICA(HugeICA):
             return self.cross_entropy_x(torch.FloatTensor(X).to(device), p_z, sigma_eps).cpu().detach().numpy()
         n, d, k = len(X), self.d, self.n_components
         n_tiles = len(X) // n
+        n_images = len(X)
 
         X = self.i2col(X)
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
 
-        X, X_, z, z_ = X.cpu(), X_.cpu(), z.cpu(), z_.cpu()
+        X, X_, z = X.cpu(), X_.cpu(), z.cpu()
 
         sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
         log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1)
@@ -256,16 +257,17 @@ class SpatialICA(HugeICA):
             return self.bits_back_code(torch.FloatTensor(X).to(device), p_z, sigma_eps, per_dim).cpu().detach().numpy()
         n, d, k = len(X), self.d, self.n_components
         n_tiles = len(X) // n
+        n_images = len(X)
 
         X = self.i2col(X)
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
-            z_ = z_[im2colOrder(len(X), len(z))]
+            z = z[im2colOrder(n_images, len(z))]
+            z_ = z_[im2colOrder(n_images, len(z))]
             log_qz_x = torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(n, -1).sum(1)
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
-            z = z[im2colOrder(len(X), len(z))]
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
+            z = z[im2colOrder(n_images, len(z))]
             z_ = z
             log_qz_x = np.zeros(n)
 

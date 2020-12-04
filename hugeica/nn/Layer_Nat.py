@@ -17,9 +17,9 @@ def isnan(x):
 def score_function(p_prime, p):
     return p_prime/p
 
-def relative_gradient(grad_output, fun_output, output):
-    psi = score_function(grad_output, fun_output)
-    return outer(psi, output)
+def relative_gradient(grad_output, y, u):
+    psi = score_function(grad_output, y)
+    return outer(psi, u)
 
 class F_SO_Linear_Relative(Function):
 
@@ -31,21 +31,25 @@ class F_SO_Linear_Relative(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        inpt, weight, output, fun_output = ctx.saved_tensors
+        inpt, weight, u, y = ctx.saved_tensors
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
         # grad_input = grad_output.mm(weight) # gradient is not needed in previous layers
         # Gradient w.r.t. weights
-        # G = relative_gradient(grad_output, fun_output, output)
-        I = torch.eye(weight.shape[0]).to(weight.device).unsqueeze(0)
-        G = I - outer(fun_output , output)
-        G = torch.bmm(G, weight.unsqueeze(0).repeat(B, 1, 1))
-        G = G.mean(0)
-        # K = torch.mean(grad_output, dim=0) - torch.diag(G)
-        # G = G * torch.sign(K)
-        G = G - G.transpose(2,1)
-        return grad_input, G, None
+        # G = relative_gradient(grad_output, y, u)
+        # I = torch.eye(weight.shape[0]).to(weight.device).unsqueeze(0)
+        # G = I - outer(y , u)
+        # G = torch.bmm(G, weight.unsqueeze(0).repeat(B, 1, 1))
+        # G = G.mean(0)
+        I = torch.eye(weight.shape[0]).to(weight.device)
+        # G = I - outer(y , u)
+        G = I - (y.T @ u)
+        G = G @ weight
+        #K = torch.mean(grad_output, dim=0) - torch.diag(G)
+        #G = G * torch.sign(K)
+        G = G - G.T
+        return grad_input, -G, None
 
 class Relative_SOGradient(nn.Module):
 
@@ -72,19 +76,26 @@ class F_Linear_Relative(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        inpt, weight, output, fun_output = ctx.saved_tensors
+        inpt, weight, output, y = ctx.saved_tensors
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
         # grad_input = grad_output.mm(weight) # gradient is not needed in previous layers
         # Gradient w.r.t. weights
-        I = torch.eye(weight.shape[0]).to(weight.device).unsqueeze(0)
-        G = I - outer(fun_output , output)
-        G = torch.bmm(G, weight.unsqueeze(0).repeat(B, 1, 1))
-        G = G.mean(0)
+        I = torch.eye(weight.shape[0]).to(weight.device)
+        # G = I - outer(y , output)
+        G = I - (y.T @ output)
+        G = G @ weight
+        #print(grad_output.shape, G.shape)
+        #print(torch.mean(grad_output, dim=0, keepdims=True).detach().shape, torch.diag(G).shape)
+        K = torch.mean(grad_output, dim=0, keepdims=True).detach() - torch.diag(G).detach()
+        #print(K.shape)
+        G = G * torch.sign(K).detach()
+        #G = torch.bmm(G, weight.unsqueeze(0).repeat(B, 1, 1))
+        #G = G.mean(0)
         #K = torch.mean(grad_output, dim=0) - torch.diag(G)
         #G = G * torch.sign(K)
-        return grad_input, G, None
+        return grad_input, -G/B, None
 
 
 class Relative_Gradient(nn.Module):

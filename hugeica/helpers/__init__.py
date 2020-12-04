@@ -6,3 +6,4 @@ from .visualization import *
 from .im2col import *
 from .stats import *
 from .bpd import *
+from .regression import *
