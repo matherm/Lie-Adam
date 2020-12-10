@@ -4,7 +4,7 @@ from hugeica import *
         
 class SFA():
 
-    def  __init__(self, n_components = 30, slow_components = 2, squared_change=False, ica=False, shape=(3,32,32), addition=False, BSZ=(16, 16), stride=4, mode="slow" ):
+    def  __init__(self, n_components = 30, slow_components = 2, squared_change=False, ica=False, shape=(3,32,32), addition=False, BSZ=(16, 16), stride=4, mode="slow", temporal_decorr=False):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
@@ -16,12 +16,17 @@ class SFA():
         self.BSZ = BSZ
         self.stride = stride
         self.mode = mode
+        self.temporal_decorr = temporal_decorr
+        
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1):
         if not self.ica and epochs > 1:
             print("Setting epochs to 1, as self.ica is False")
             epochs = 1
 
+        ####################################
+        # TiledICA
+        ###################################
         self.model = SpatialICA(shape=self.shape, 
                            BSZ=self.BSZ, 
                            padding=0, 
@@ -36,10 +41,15 @@ class SFA():
         
         if not self.ica:
             self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
+
+        self.H_receptive = entropy_gaussian(self.model.cov)
         
+        ####################################
+        # SFA 
+        ####################################
         S = self.model.transform(X, agg="none", bs=bs)
+
         S = S.reshape(-1, self.n_components)        
-        
         if self.addition:
             S_change_score = (S.reshape(-1, self.model.n_tiles, self.n_components) + np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
         else:
@@ -68,6 +78,20 @@ class SFA():
         # Update the indepenendent components
         self.model.n_components = self.slow_components
         self.model.net.ica.weight.data =  (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
+
+        self.H_neighbor = entropy_gaussian(self.sfa.cov)
+
+        ####################################
+        # Decorrelation
+        ####################################
+        if self.temporal_decorr:
+            S = self.model.transform(X, agg="none", bs=bs)
+            t = S.shape[1]
+            self.T_temp = []
+            for c in range(self.slow_components):
+                klt = HugeICA(t)
+                klt.fit(S[:, :, c], 1, X_val=S[:, :, c][:100], logging=-1, lr=1e-2, bs=bs)
+                self.T_temp.append(klt)
 
 
     @staticmethod
@@ -131,14 +155,15 @@ class SFA():
                                 k_max  = model.change_variance_.max()
                                 k      = model.change_variance_.max()/model.change_variance_.min()
                                 K      = kurt( model.transform(X, agg="sum")).mean()
-                                bookkeeping.append([p, s, c, nor, spread, k_min, k_max, k, K, bbc, bpd, bbcpd] + auc )
+                                H_receptive = model.H_receptive
+                                H_neighbor  = model.H_neighbor
+                                bookkeeping.append([p, s, c, nor, spread, k_min, k_max, k, K, bbc, bpd, bbcpd, H_receptive, H_neighbor] + auc )
                         except:
                             e = sys.exc_info()[0]
                             print("Error in config:", p, s, "- caused by ", e)
                             
         return np.asarray(bookkeeping).astype(np.float32)
     
-
     def to(self, device):
         self.model.to(device)
 
@@ -157,8 +182,19 @@ class SFA():
     def bits_back_code(self, *args, **kwargs):
         return self.model.bits_back_code(*args, **kwargs)
 
+    def reconstruct(self, *args, **kwargs):
+        return self.model.reconstruct(*args, **kwargs)
+
     def transform(self, X, exponent=1, agg="none", bs=-1, act=lambda x : x):
-        return self.model.transform(X, exponent=exponent, agg=agg, bs=bs, act=act)
+        if self.temporal_decorr:
+            S = self.model.transform(X, exponent=exponent, agg="none", bs=bs, act=act)
+            for c in range(self.slow_components):
+                klt = self.T_temp[c]
+                S[:, :, c] = klt.transform(S[:, :, c]) 
+            S = self.model.agg(S, agg)
+        else:
+            S = self.model.transform(X, exponent=exponent, agg=agg, bs=bs, act=act)
+        return S
 
     def martingale(self, X):
         """

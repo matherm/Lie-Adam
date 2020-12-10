@@ -63,28 +63,48 @@ class SpatialICA(HugeICA):
         s = torch.pow(s, exponent=exponent)
         s = act(s)
         s = s[im2colOrder(n_images, n_patches)]         # reorder such that patches of same image are consecutive
+        s = s.reshape(-1, n_tiles, n_components)
+        s = self.agg(s, agg)
+        return s
+
+    def agg(self, s, agg):
         if agg == "mean":
-            s = s.reshape(-1, n_tiles, n_components).mean(1) # average over patches of the same image
+            s = s.mean(1) # average over patches of the same image
         elif agg == "diff":
-            s = sum_of_diff(s.reshape(-1, n_tiles, n_components),1) # average over patches of the same image
+            s = sum_of_diff(s, 1) # average over patches of the same image
+        elif agg == "coherence":
+            s = s
+            st = torch.roll(s, 1, dims=1)
+            s = (s * st).sum(2, keepdims=True) # dot product between components
+            s = s.mean(1) # temporal average
+        elif agg == "shufflediff":
+            idx = np.random.permutation(np.arange(n_tiles))
+            s = sum_of_diff(s[:, idx, :], 1) # average over patches of the same image
         elif agg == "sum":
-            s = s.reshape(-1, n_tiles, n_components).sum(1) # sum over patches of the same image
+            s = s.sum(1) # sum over patches of the same image
+        elif agg == "shufflesum":
+            idx = np.random.permutation(np.arange(n_tiles))
+            s = s[:, idx, :].sum(1) # sum over patches of the same image
         elif agg == "std":
-            s = s.reshape(-1, n_tiles, n_components).std(1) # sum over patches of the same image
+            s = s.std(1) # sum over patches of the same image
         elif agg == "var":
-            s = s.reshape(-1, n_tiles, n_components).var(1) # sum over patches of the same image
+            s = s.var(1) # sum over patches of the same image
         elif agg == "prod":
-            s = s.reshape(-1, n_tiles, n_components).prod(1) # sum over patches of the same image
+            s = s.prod(1) # sum over patches of the same image
         elif agg == "max":
-            s = s.reshape(-1, n_tiles, n_components).max(1)[0] # sum over patches of the same image
+            s = s.max(1)[0] # sum over patches of the same image
         elif agg == "min":
-            s = s.reshape(-1, n_tiles, n_components).min(1)[0] # sum over patches of the same image
+            s = s.min(1)[0] # sum over patches of the same image
+        elif agg == "skew":
+            s = s - s.mean(1, keepdims=True)
+            s = s - s.std(1, keepdims=True)
+            s = (s**3).mean(1)
         elif agg == "invprod": 
-            s = torch.reciprocal(s).reshape(-1, n_tiles, n_components).prod(1) # sum over patches of the same image
+            s = torch.reciprocal(s).prod(1) # sum over patches of the same image
         elif agg == "invsum":
-            s = torch.reciprocal(s).reshape(-1, n_tiles, n_components).sum(1) # sum over patches of the same image
+            s = torch.reciprocal(s).sum(1) # sum over patches of the same image
         elif agg == "none":
-            s = s.reshape(-1, n_tiles, n_components)
+            s = s
         else:
             raise ValueError(f"agg == {agg} not understood.") 
         return s
@@ -126,7 +146,7 @@ class SpatialICA(HugeICA):
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
             return self.reconstruct(torch.FloatTensor(X).to(device)).cpu().detach().numpy()
-        patches, z = self.predict(X)
+        patches, z, z_ = self.predict(X)
         X_ = self.col2i(patches, len(X)).reshape(len(X), -1)
         return X_
 

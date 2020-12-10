@@ -28,3 +28,6 @@ class AR1():
             t = change
             logprobs += torch.distributions.Normal(self.mean, self.std).log_prob(t).sum(1)
         return logprobs.reshape(-1, 1) # mimic spatial dimension for elbo
+
+
+        

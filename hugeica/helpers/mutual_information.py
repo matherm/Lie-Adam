@@ -42,6 +42,7 @@ def entropy_gaussian(C):
         return .5*(1 + np.log(2*pi)) + .5*np.log(C)
     else:
         n = C.shape[0] # dimension
+        return .5*n*(1 + np.log(2*pi)) + .5*np.linalg.slogdet(C)[1]
         return .5*n*(1 + np.log(2*pi)) + .5*np.log(abs(det(C)))
 
 

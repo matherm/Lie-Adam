@@ -218,6 +218,11 @@ class HugeICA(nn.Module):
         return sigma
 
     @property
+    def cov(self):
+        W = self.components
+        return (W @ np.diag(self.explained_variance_) @ W.T) + np.eye(self.d) * self.cov_sigma
+
+    @property
     def mu(self):
         return self.net.whiten.mean_.data.detach().cpu().numpy()
 
@@ -291,9 +296,8 @@ class HugeICA(nn.Module):
         logdet = lambda A : torch.logdet(torch.FloatTensor(A)).numpy()
         X = X - self.mu
 
-        W = self.net.whiten.weight.detach().cpu().numpy().T
         # Compute covariance and inverse
-        C = (W @ np.diag(self.explained_variance_) @ W.T) + np.eye(d) * self.cov_sigma
+        C = self.cov
         C_inv  = np.linalg.pinv(C)  # d x d
         
         # Malahanobis

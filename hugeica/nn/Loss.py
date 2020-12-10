@@ -129,7 +129,7 @@ class Loss():
         """
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
-        S = S - S.mean()
+        S = S - S.mean(0)
         S = S / S.std(0)
         Loss.GAMMA = Loss.GAMMA.to(S.device)     
         E_G_z = G_fun(S).mean(0) 
@@ -148,3 +148,14 @@ class Loss():
     @staticmethod
     def grad_norm(grad_old, grad_new):
         return torch.norm(grad_old - grad_new).cpu().detach().item()
+
+    @staticmethod
+    def amari(A, B):
+        R = (A @ B)**2
+        amari = ((R/R.max(0, keepdims=True)).sum(0)-1).sum() + ((R/R.max(1, keepdims=True)).sum(1)-1).sum()
+        return amari
+
+    @staticmethod
+    def mcc(S, S_):
+        mcc = np.abs(((S.T/np.linalg.norm(S.T,axis=0)).T @ (S_/np.linalg.norm(S_,axis=0)))).max(1).mean()
+        return mcc
