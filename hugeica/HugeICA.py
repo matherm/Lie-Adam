@@ -344,8 +344,7 @@ class HugeICA(nn.Module):
             H_qz_q = entropy_gaussian(np.eye(k))
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(z.shape).reshape(-1, k).sum(1)
         else:
-            X_, z = self.predict(X, sample_scale=sample_scale)
-            z_ = z
+            X_, z, z_ = self.predict(X, sample_scale=sample_scale)
             H_qz_q = 0.
 
         sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
@@ -505,7 +504,7 @@ class HugeICA(nn.Module):
                    loss.cpu().item()/len(validation_loader), # 1
                    Loss.FrobCov(S_),                         # 2
                    Loss.Kurtosis(S_),                        # 3
-                   Loss.NegentropyLoss(S, self.G),           # 4    
+                  -Loss.NegentropyLoss(S, self.G),           # 4    
                    time.time() - t_start,                    # 5
                    Loss.grad_norm(grad_old, self.grad()),    # 6
                    Loss.Logprob(S, self.G) if not isinstance(self.loss, nn.Module) else 0., # 7
@@ -524,4 +523,6 @@ class HugeICA(nn.Module):
         else:
             print("Residuals cannot be computed when whiten=False")
         
+        # if self.history[-1][6] > 1e-3:
+        #    print(f"Training did non converge. Gradient norm was", self.history[-1][6])
         return self.history

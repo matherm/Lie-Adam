@@ -74,7 +74,7 @@ class Loss():
         """is log-probability
         """
         # hat
-        return torch.log(0.5*torch.exp(-torch.abs(x)))
+        return np.log(0.5) - torch.abs(x) 
 
     @staticmethod
     def TemporalHyper(x, n_channels=43):

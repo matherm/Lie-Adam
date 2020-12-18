@@ -1,10 +1,14 @@
+from itertools import product
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
 from hugeica import *
-        
+    
+def neg_diff(s):
+    return -Loss.NegentropyLoss(torch.FloatTensor(s).unsqueeze(1), G_fun=Loss.Logcosh).numpy()
+
 class SFA():
 
-    def  __init__(self, n_components = 30, slow_components = 2, squared_change=False, ica=False, shape=(3,32,32), addition=False, BSZ=(16, 16), stride=4, mode="slow", temporal_decorr=False):
+    def  __init__(self, n_components = 30, slow_components = 2, squared_change=False, ica=False, shape=(3,32,32), addition=False, BSZ=(16, 16), stride=4, mode="slow", temporal_decorr=False, act=lambda x : x):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
@@ -17,9 +21,10 @@ class SFA():
         self.stride = stride
         self.mode = mode
         self.temporal_decorr = temporal_decorr
+        self.act = act
         
     
-    def fit(self, X, epochs = 15, bs=10000, logging=-1):
+    def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2):
         if not self.ica and epochs > 1:
             print("Setting epochs to 1, as self.ica is False")
             epochs = 1
@@ -36,19 +41,28 @@ class SFA():
                            optimistic_whitening_rate=1000, 
                            whitening_strategy="batch", 
                            reduce_lr=True)
-        self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=1e-2, bs=bs)
+        self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
         
         if not self.ica:
             self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
-
-        self.H_receptive = entropy_gaussian(self.model.cov)
+        ####################################
+        # Transform
+        ###################################
+        S = self.model.transform(X, agg="none", bs=bs, act=self.act)
         
+        # Compute some Information measures
+        self.H_receptive       =  entropy_gaussian(self.model.cov)
+        self.H_signal_sparse   = -Loss.LogcoshNormalized(torch.FloatTensor(S.reshape(-1, self.n_components))).sum(1).mean(0).numpy()
+        self.H_signal_gauss    = -Loss.Gaussian(torch.FloatTensor(S.reshape(-1, self.n_components))).sum(1).mean(0).numpy()
+        self.I_signal          =  np.asarray([entropy_bins( np.tanh(S.reshape(-1, self.n_components)[:, i]) ) for i in range(self.n_components)]).sum() -  entropy_gaussian(np.eye(self.n_components))
+        self.H_signal2d_sparse = -Loss.LogcoshNormalized(torch.FloatTensor(S)).sum((1,2)).mean(0).numpy()
+        self.H_signal2d_gauss  = -Loss.Gaussian(torch.FloatTensor(S)).sum((1,2)).mean(0).numpy()
+        self.I_signal2d        =  np.asarray([entropy_bins( np.tanh(S[:,i,j]) ) for i,j in product(range(S.shape[1]),range(self.n_components))]).sum() -  entropy_gaussian(dim=self.n_components*S.shape[1])
+
         ####################################
         # SFA 
         ####################################
-        S = self.model.transform(X, agg="none", bs=bs)
-
         S = S.reshape(-1, self.n_components)        
         if self.addition:
             S_change_score = (S.reshape(-1, self.model.n_tiles, self.n_components) + np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
@@ -76,16 +90,27 @@ class SFA():
                 self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.slow_components:]]
 
         # Update the indepenendent components
-        self.model.n_components = self.slow_components
+        self.model.n_components        = self.slow_components
         self.model.net.ica.weight.data =  (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
 
-        self.H_neighbor = entropy_gaussian(self.sfa.cov)
+        # Compute some Information measures
+        self.H_neighbor   = entropy_gaussian(self.sfa.cov)
+        self.I_neighbor   = self.H_neighbor - entropy_gaussian(dim=self.n_components)
+        self.H_receptive2 = self.H_receptive
+        self.H_max        =  self.H_receptive/(3*np.prod(self.BSZ)) + (self.H_neighbor/self.n_components) 
+        
+        ####################################
+        # Transform
+        ###################################
+        S = self.model.transform(X, agg="none", bs=bs, act=self.act)
+        
+        # Compute some Information measures
+        self.I_neighbor_negentropy   = neg_diff(np.abs(np.diff(S, axis=1).flatten()))
 
         ####################################
         # Decorrelation
         ####################################
         if self.temporal_decorr:
-            S = self.model.transform(X, agg="none", bs=bs)
             t = S.shape[1]
             self.T_temp = []
             for c in range(self.slow_components):
@@ -143,7 +168,7 @@ class SFA():
                                             n_components=c,
                                             slow_components=c if remove_components is None else c - remove_components,
                                             ica = ica)
-                            model.fit(X_, epochs, bs=bs)
+                            model.fit(X_, epochs, bs=bs, logging=-1)
 
                             for nor in norm:
                                 auc    = [agg(mode, X_in_, X_out_, nor) for mode in ["var", "std", "sum", "mean", "prod", "invsum", "max", "min"]]
@@ -155,12 +180,22 @@ class SFA():
                                 k_max  = model.change_variance_.max()
                                 k      = model.change_variance_.max()/model.change_variance_.min()
                                 K      = kurt( model.transform(X, agg="sum")).mean()
-                                H_receptive = model.H_receptive
-                                H_neighbor  = model.H_neighbor
-                                bookkeeping.append([p, s, c, nor, spread, k_min, k_max, k, K, bbc, bpd, bbcpd, H_receptive, H_neighbor] + auc )
+                                H_receptive  = model.H_receptive
+                                H_receptive2 = model.H_receptive2
+                                H_neighbor   = model.H_neighbor
+                                H_signal_sparse = model.H_signal_sparse
+                                H_signal_gauss  = model.H_signal_gauss
+                                I_signal             = model.I_signal
+                                I_neighbor           = model.I_neighbor
+                                I_neighbor_negentropy= model.I_neighbor_negentropy
+                                H_max                = model.H_max
+                                bookkeeping.append([p, s, c, nor, \
+                                    spread, k_min, k_max, k, K, bbc, bpd, bbcpd, \
+                                        H_receptive, H_receptive2, H_neighbor, H_signal_sparse, H_signal_gauss, \
+                                            I_signal, I_neighbor, I_neighbor_negentropy, H_max] + auc )
                         except:
                             e = sys.exc_info()[0]
-                            print("Error in config:", p, s, "- caused by ", e)
+                            print("Error in config:", p, s, c, nor, "- caused by ", e)
                             
         return np.asarray(bookkeeping).astype(np.float32)
     
@@ -203,7 +238,7 @@ class SFA():
         slope, inter = batch_regression(X)
         return inter 
     
-    def score(self, X, ord=1, abs=False, exp=1):
+    def score(self, X, ord=2, abs=False, exp=1):
         if abs:
             score = np.abs(self.transform(X))
         elif exp > 1:

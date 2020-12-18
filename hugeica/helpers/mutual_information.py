@@ -15,10 +15,19 @@ from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
 
-__all__=['entropy', 'mutual_information', 'entropy_gaussian']
+__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins']
 
 EPS = np.finfo(float).eps
 
+def entropy_bins(vals, bins=50):
+    '''
+    Entropy of 1d signal computed by binning.
+    '''
+    h = np.histogram(vals, bins=bins, density=False)[0]
+    logits = h/h.sum()
+    logits += 1e-8
+    probs = logits / logits.sum()
+    return -np.sum(probs * np.log(probs))
 
 def nearest_distances(X, k=1):
     '''
@@ -34,10 +43,12 @@ def nearest_distances(X, k=1):
     return d[:, -1] # returns the distance to the kth nearest neighbor
 
 
-def entropy_gaussian(C):
+def entropy_gaussian(C=None, dim=1):
     '''
     Entropy of a gaussian variable with covariance matrix C
     '''
+    if C is None:
+        return .5*dim*(1 + np.log(2*pi))
     if np.isscalar(C): # C is the variance
         return .5*(1 + np.log(2*pi)) + .5*np.log(C)
     else:
