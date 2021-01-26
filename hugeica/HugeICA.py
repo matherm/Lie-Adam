@@ -20,8 +20,6 @@ class Net(nn.Module):
                 
         if derivative == "lie":
             self.ica    = SO_Layer(n_components)
-        elif derivative == "relativeso":
-            self.ica    = Relative_SOGradient(n_components, fun)
         elif derivative == "relative":
             self.ica    = Relative_Gradient(n_components, fun)
         else:
