@@ -112,8 +112,7 @@ class HugeICA(nn.Module):
         else:
             raise ValueError(f"loss={loss} not understood.")
 
-    def reset(self, input_dim, dataset_size, lr=1e-3):
-        self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+    def reset(self, lr=1e-3):
         if self.optimitzer == "adam":
             if isinstance(self.G, nn.Module):
                 if self.whiten:
@@ -207,7 +206,7 @@ class HugeICA(nn.Module):
         return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
     @property
-    def cov_sigma(self):
+    def cov(self): 
         total_var = self.var.sum()
         explain_var = self.explained_variance_.sum()
         d, k = self.d, self.n_components
@@ -215,12 +214,8 @@ class HugeICA(nn.Module):
             sigma =  1 / (d-k) * (total_var - explain_var) 
         else:
             sigma = 0.
-        return sigma
-
-    @property
-    def cov(self):
         W = self.components
-        return (W @ np.diag(self.explained_variance_) @ W.T) + np.eye(self.d) * self.cov_sigma
+        return (W @ np.diag(self.explained_variance_ - sigma) @ W.T) + np.eye(d) * sigma
 
     @property
     def mu(self):
@@ -356,65 +351,6 @@ class HugeICA(nn.Module):
     def bpd(self, X):
         return -self.elbo(X) / (np.log(2) * self.d)
 
-    def bpd_pca_logit(self, X):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        X, sldj = to_logit(X)
-        self.set_residuals_std(X)
-        elbo_X = self.log_prob(X) + log_abs_inverval + sldj
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_pca_normal(self, X, mean, std):
-        """
-        # log determinant of jacobean
-        # [0 , 255] # -128 --> [-128, 128] --> 0
-        # [-128, 128] # /128 --> [-1, 1] --> np.log(1/128)*dim
-        # np.log(1/128)*dim = dim*(log(1) - log(128)) = -dim*log(128)
-
-        # p(x) = p(f^-1(x))|det df f^-1(x)|
-        # log p(x) = log p(z) + log_det_J # Division is minus
-        """
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
-        if type(np.asarray(std)) == numpy.ndarray:
-            log_abs_scale = -np.log(std).sum()
-        else:
-            log_abs_scale = -np.log(std)*dim
-        X = (X - mean) / std
-        self.set_residuals_std(X)
-        elbo_X = self.log_prob(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_ica_normal(self, X, mean, std):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
-        if type(np.asarray(std)) == numpy.ndarray:
-            log_abs_scale = -np.log(std).sum()
-        else:
-            log_abs_scale = -np.log(std)*dim        
-        X = (X - mean) / std
-        self.set_residuals_std(X)
-        elbo_X = self.elbo(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_ica_logit(self, X):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        X, sldj = to_logit(X)
-        self.set_residuals_std(X)
-        elbo_X = self.elbo(X) + log_abs_inverval + sldj
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
     def score_norm(self, X, ord=0.5):
         if not torch.is_tensor(X):
             return self.score_norm(torch.from_numpy(X)).cpu().numpy()
@@ -454,10 +390,6 @@ class HugeICA(nn.Module):
             if not isinstance(validation_loader, torch.utils.data.DataLoader):   
                 validation_loader = FastTensorDataLoader(tensors, batch_size=bs)
 
-        # seems to be the shortest way to find out the data dimension of a dataloader
-        for dat in validation_loader:
-            self.d = dat[0].shape[1]
-            break
         return dataloader, validation_loader
 
     def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs="auto", logging=-1):
@@ -465,6 +397,11 @@ class HugeICA(nn.Module):
         dataloader, validation_loader = self._prepare_input(X, X_val, bs)
         dataset_size = len(dataloader) * dataloader.batch_size
         t_start = time.time()
+
+        if self.net is None: 
+            self.d = X.shape[1]
+            self.net = Net(self.d, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+            self.reset(lr)
           
         def fit(ep):
             if ep == 0 and logging > 0:
@@ -475,11 +412,7 @@ class HugeICA(nn.Module):
                 self.reduce_lr()
             losses = 0.
             for batch, _ in iterator:
-                data, label = batch[0].to(self.device), None
-                
-                if self.net is None: 
-                    self.reset(self.d, dataset_size, lr)
-                
+                data, label = batch[0].to(self.device), None              
                 self.optim.zero_grad()
                 output = self.net(data)
                 loss = self.loss(output).mean()
@@ -499,7 +432,8 @@ class HugeICA(nn.Module):
                 output = self.net(data).detach()
                 loss += self.loss(output).mean()
                 datalist.append(output)
-            S, S_ = torch.cat(datalist, dim=0), torch.cat(datalist, dim=0).cpu().numpy()
+            S = torch.cat(datalist, dim=0)
+            S_ = S.cpu().numpy()
             loss =(ep,                                       # 0
                    loss.cpu().item()/len(validation_loader), # 1
                    Loss.FrobCov(S_),                         # 2

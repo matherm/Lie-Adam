@@ -15,9 +15,17 @@ from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
 
-__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins']
+__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian']
 
 EPS = np.finfo(float).eps
+
+
+def KL_gaussian(N0, N1):
+    k = N0.shape[0]
+    N1_ = np.linalg.inv(N1)
+    log_det_0 = np.linalg.slogdet(N0)[1]
+    log_det_1 = np.linalg.slogdet(N1)[1]
+    return 0.5*(np.trace(N1_ @ N0) - k + log_det_1 - log_det_0)
 
 def entropy_bins(vals, bins=50):
     '''
@@ -43,18 +51,37 @@ def nearest_distances(X, k=1):
     return d[:, -1] # returns the distance to the kth nearest neighbor
 
 
-def entropy_gaussian(C=None, dim=1):
+def max_entropy_gaussian(C, kaiser=True):
+    eigvals = np.linalg.eigvals(C)
+    eigvals = np.sort(eigvals)[::-1]
+    if kaiser:
+        ltn = eigvals >= 1.0
+        return ltn.astype(np.int32).sum()
+    else:
+        H = 1/2 + 1/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:1]))
+        for i in range(2, len(eigvals)+1):
+            H_ = i/2 + i/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:i]))
+            if H_ > H:
+                H = H_
+            else:
+                break
+        return i-1
+    
+def entropy_gaussian(C=None, dim=None):
     '''
     Entropy of a gaussian variable with covariance matrix C
     '''
-    if C is None:
-        return .5*dim*(1 + np.log(2*pi))
     if np.isscalar(C): # C is the variance
         return .5*(1 + np.log(2*pi)) + .5*np.log(C)
-    else:
-        n = C.shape[0] # dimension
-        return .5*n*(1 + np.log(2*pi)) + .5*np.linalg.slogdet(C)[1]
-        return .5*n*(1 + np.log(2*pi)) + .5*np.log(abs(det(C)))
+    if C is None and dim is not None:
+        return .5*dim*(1 + np.log(2*pi))
+    if C is not None and dim is not None:
+        eigvals = np.linalg.eigvals(C)
+        eigvals = np.abs(np.sort(eigvals)[::-1])
+        return  dim/2 + dim/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:dim]))
+    n = C.shape[0] # dimension
+    return .5*n*(1 + np.log(2*pi)) + .5*np.linalg.slogdet(C)[1]
+    return .5*n*(1 + np.log(2*pi)) + .5*np.log(abs(det(C)))
 
 
 def joint_entropy(variables, k=1):

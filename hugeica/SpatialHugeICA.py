@@ -6,6 +6,26 @@ import scipy
 from tqdm import tqdm
 from hugeica import *
 
+class Net2d(nn.Module):
+
+    def __init__(self, inpt_shape, out_channels, filter_size, stride, ds_size, whiten):
+        super().__init__()
+
+        self.inpt = Reshape((-1, *inpt_shape))
+        self.whiten = Batch_PCA_Layer2d(inpt_shape[0], out_channels, filter_size=filter_size, stride=stride,  ds_size=ds_size, updating=True)
+        self.ica    = SO_Layer2d(out_channels, filter_size=1, stride=1)
+        self.transpose = nn.Sequential(Transpose(1, 2), Transpose(2, 3))
+        self.output = Reshape((-1, out_channels))
+        if self.whiten:
+            self.net = nn.Sequential(self.whiten, self.ica)
+        else:
+            self.net = self.ica
+
+    def transform(self, X):
+        return self.transpose(self.net(self.inpt(X)))
+
+    def forward(self, X):
+        return self.output(self.transpose(self.net(self.inpt(X))))
 
 class SpatialICA(HugeICA):
     
@@ -26,14 +46,20 @@ class SpatialICA(HugeICA):
         self.BSZ = BSZ
         self.stride = stride
         self.padding = padding
-        
-        self.i2col = lambda X: torch.FloatTensor(
-                                    im2col(X.reshape(len(X), *shape).cpu().numpy(), BSZ=self.BSZ, padding=self.padding, stride=self.stride).T
-                                ).to(X.device)
-
+        self.n_tiles   = ((shape[1]-BSZ[0])//stride+1)**2
+    
         self.col2i = lambda X,len_X: torch.FloatTensor(
                                     col2im(BSZ=self.BSZ, agg="avg", cols=X.cpu().numpy().T, x_shape=(len_X, *shape), padding=self.padding, stride=self.stride)
                                 ).to(X.device)
+    
+    def i2col(self, X):
+        i2col = torch.FloatTensor(
+                                    im2col(X.reshape(len(X), *self.shape).cpu().numpy(), BSZ=self.BSZ, padding=self.padding, stride=self.stride).T
+                                ).to(X.device)
+        return i2col
+        print("TODO: Local contrast normalization")
+        return i2col/i2col.std(1, keepdims=True)
+
     
     def transform(self, X, exponent=1, agg="mean", bs=-1, act=lambda x : x):
         """
@@ -50,22 +76,37 @@ class SpatialICA(HugeICA):
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
             return self.transform(torch.FloatTensor(X).to(device), exponent=exponent, agg=agg, bs=bs, act=act).cpu().detach().numpy()
-        X_ = self.i2col(X)
-        n_tiles   = len(X_) // len(X)
-        n_images  = len(X_) // n_tiles
-        n_patches = len(X_)
         n_components = self.n_components
         if bs < 0:
             bs = len(X)
-        # see: https://stackoverflow.com/questions/59520967/super-keyword-doesnt-work-properly-in-list-comprehension
-        sup_transform = super().transform 
-        s = torch.cat([sup_transform(X_[i:i+bs]) for i in range(0, len(X_), bs)], dim=0) # transform the patches
-        s = torch.pow(s, exponent=exponent)
-        s = act(s)
-        s = s[im2colOrder(n_images, n_patches)]         # reorder such that patches of same image are consecutive
-        s = s.reshape(-1, n_tiles, n_components)
+        if isinstance(self.net, Net2d):
+            device = next(self.parameters()).device
+            s = torch.cat([self.net.transform(X[i:i+bs].to(device)) for i in range(0, len(X), bs)], dim=0) # transform the patches
+            s = torch.pow(s, exponent=exponent)
+            s = act(s)
+            s = s.reshape(len(s), -1, n_components)
+        else:
+            X_ = self.i2col(X)
+            n_tiles   = len(X_) // len(X)
+            n_images  = len(X_) // n_tiles
+            n_patches = len(X_)
+            # see: https://stackoverflow.com/questions/59520967/super-keyword-doesnt-work-properly-in-list-comprehension
+            sup_transform = super().transform 
+            s = torch.cat([sup_transform(X_[i:i+bs]) for i in range(0, len(X_), bs)], dim=0) # transform the patches
+            s = torch.pow(s, exponent=exponent)
+            s = act(s)
+            s = s[im2colOrder(n_images, n_patches)]         # reorder such that patches of same image are consecutive
+            s = s.reshape(-1, n_tiles, n_components)
         s = self.agg(s, agg)
         return s
+
+    def set_residuals_std(self, X):
+        """
+        Computes the residuals for the ELBO estimation.
+        """
+        if X.shape[1] > self.d:
+            X = self.i2col(X)
+        super().set_residuals_std(X)
 
     def agg(self, s, agg):
         if agg == "mean":
@@ -109,7 +150,7 @@ class SpatialICA(HugeICA):
             raise ValueError(f"agg == {agg} not understood.") 
         return s
     
-    def score_norm(self, X, ord=0.5, exponent=1):
+    def score_norm(self, X, ord=2, exponent=1):
         """
         Computes the norm of the transformed components.
         ||E_patches[s]||
@@ -149,6 +190,7 @@ class SpatialICA(HugeICA):
         patches, z, z_ = self.predict(X)
         X_ = self.col2i(patches, len(X)).reshape(len(X), -1)
         return X_
+        
 
    
     def elbo(self, X, p_z=Loss.ExpNormalized, sigma_eps=1e-5,  sample_scale=0.):
@@ -324,12 +366,25 @@ class SpatialICA(HugeICA):
         X_ = self.i2col(X)
         return super().transform(X_)
     
-    def fit(self, X, epochs, X_val, *args, **kwargs):
+    def fit(self, X, epochs, X_val, lr=1e-3, *args, **kwargs):
         if not torch.is_tensor(X):
             return self.fit(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), *args, **kwargs)
         X_ = self.i2col(X)         # patching
         X_val_ = self.i2col(X_val) # patching
         X_ = X_[im2colOrder(len(X), len(X_))] # reordering
         X_val_ = X_val_[im2colOrder(len(X_val), len(X_val_))] # reordering
-        self.n_tiles   = len(X_) // len(X)
+
         super().fit(X_, epochs, X_val_, *args, **kwargs)
+
+
+    def fit2d(self, X, epochs, X_val, lr=1e-3, *args, **kwargs):
+        raise NotImplementedError("This one is not implemented yet.")
+        if not torch.is_tensor(X):
+            return self.fit2d(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), *args, **kwargs)
+
+        if self.net is None:
+            self.d = self.shape[0]*self.BSZ[0]**2
+            self.net = Net2d(self.shape, self.n_components, filter_size=self.BSZ[0], stride=self.stride,  ds_size=int(len(X) * self.optimistic_whitening_rate), whiten=self.whiten)
+            self.reset(lr)
+
+        super().fit(X, epochs, X_val, *args, **kwargs)

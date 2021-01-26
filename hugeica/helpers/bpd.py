@@ -1,6 +1,7 @@
 import numpy as np
 from ..nn.Loss import Loss
 from ..data.Preprocessing import *
+from .im2col import *
 
 def bpd_pca_logit(model, X, mean, std):
     assert X.min() >= 0 and X.max() <= 1
@@ -39,6 +40,19 @@ def bpd_pca_elbo(model, X, mean, std, p_z=Loss.Gaussian):
     X, sldj_contr = to_norm_contrast(X)
     X, sldj_scale = scale(X, mean, std)
     elbo_X = model.elbo(X, p_z) + sldj_inter + sldj_scale + sldj_contr
+    bpd_X = -elbo_X/(np.log(2) * dim)
+    return bpd_X
+
+def bpd_pca_elbo_receptive(model, X, mean, std, p_z=Loss.Gaussian):
+    assert X.min() >= 0 and X.max() <= 1
+    n = X.shape[0]
+    X = model.i2col(torch.FloatTensor(X))
+    X = X[im2colOrder(n, len(X))]
+    dim = X.shape[1]
+    X, sldj_inter = dequantize(X)
+    X, sldj_contr = to_norm_contrast(X)
+    X, sldj_scale = scale(X, np.asarray(mean).mean(), np.asarray(std).mean())
+    elbo_X = super(type(model), model).elbo(X, p_z) + sldj_inter + sldj_scale + sldj_contr
     bpd_X = -elbo_X/(np.log(2) * dim)
     return bpd_X
 
@@ -116,6 +130,29 @@ def bpd_elbo_logit(model, X, mean, std, p_z=Loss.Gaussian):
     X, sldj_logit = to_logit(X)
     X, sldj_scale = scale(X, mean, std)
     elbo_X = model.elbo(X, p_z) + sldj_inter + sldj_logit + sldj_scale
+    bpd_X = -elbo_X/(np.log(2) * dim)
+    return bpd_X
+
+def bpd_elbo(model, X, mean, std, p_z=Loss.Gaussian):
+    assert X.min() >= 0 and X.max() <= 1
+    dim = X.shape[1]
+    X, sldj_inter = dequantize(X)
+    X, sldj_contr = to_norm_contrast(X)
+    X, sldj_scale = scale(X, mean, std)
+    elbo_X = model.elbo(X, p_z) + sldj_inter + sldj_contr + sldj_scale
+    bpd_X = -elbo_X/(np.log(2) * dim)
+    return bpd_X
+
+def bpd_elbo_logit_receptive(model, X, mean, std, p_z=Loss.Gaussian):
+    assert X.min() >= 0 and X.max() <= 1
+    n = X.shape[0]
+    X = model.i2col(torch.FloatTensor(X))
+    X = X[im2colOrder(n, len(X))]
+    dim = X.shape[1]
+    X, sldj_inter = dequantize(X)
+    X, sldj_logit = to_logit(X)
+    X, sldj_scale = scale(X, mean, std)
+    elbo_X = super(type(model), model).elbo(X, p_z) + sldj_inter + sldj_logit + sldj_scale
     bpd_X = -elbo_X/(np.log(2) * dim)
     return bpd_X
 

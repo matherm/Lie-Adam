@@ -5,6 +5,8 @@ from .Layer_Variance import *
 from .Layer_Nat import *
 from .Parameter import *
 from .Loss import *
+from .Transpose import *
+from .Reshape import *
 from .AR import *
 from .ParametricLoss import ParametricLoss
 from .AdaptiveLoss import Adaptive

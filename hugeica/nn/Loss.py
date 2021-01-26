@@ -110,7 +110,7 @@ class Loss():
 
     @staticmethod
     def FrobCov(S):
-        return np.linalg.norm(np.cov((S).T) - np.eye(S.shape[1])) / S.shape[1]
+        return np.linalg.norm(np.cov(S.T) - np.eye(S.shape[1])) / S.shape[1]
 
     @staticmethod
     def Kurtosis(S):
@@ -151,7 +151,7 @@ class Loss():
 
     @staticmethod
     def amari(A, B):
-        R = (A @ B)**2
+        R = np.abs(A @ B)
         amari = ((R/R.max(0, keepdims=True)).sum(0)-1).sum() + ((R/R.max(1, keepdims=True)).sum(1)-1).sum()
         return amari
 
