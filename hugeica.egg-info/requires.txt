@@ -1,8 +1,0 @@
-numpy>=1.5.0
-scipy
-imageio
-scikit-learn
-torch
-tqdm
-torchvision
-matplotlib
