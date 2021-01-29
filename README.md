@@ -1,4 +1,4 @@
-# FasterICA
+# HugeICA
 
 PyTorch implementation of HugeICA. 
 
