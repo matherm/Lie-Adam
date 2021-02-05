@@ -23,13 +23,13 @@ Implements the following algorithms in Pytorch:
 
 1. For GIT:
 ```
-git clone git@fasterica.git
+git clone git@hugeica.git
 python setup.py install|develop
 ```
 
 2. For PIP
 ```
-pip install fasterica.git
+pip install hugeica.git
 ```
 
 ### Tests
