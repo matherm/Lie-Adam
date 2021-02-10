@@ -219,12 +219,20 @@ class SpatialICA(HugeICA):
 
         X, X_, z, z_ = X.cpu(), X_.cpu(), z.cpu(), z_.cpu()
 
-        sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
-        log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1)
+        #sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
+        #sigma_per_dim = torch.ones_like(X.flatten()) # add minimal variance
+        #print(X.shape, "distributions")
+        #log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim)
+        #print(X.shape, "distributions", X_.flatten().mean())
+        #log_px_z = log_px_z.log_prob(X_.flatten()).reshape(len(X), -1)
+        #print(X.shape, "col2i")
+        log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1)
         log_px_z = self.col2i(log_px_z, n)
+        #print(X.shape, "log_px_z")
         log_px_z = log_px_z.reshape(n, -1).sum(1)
 
         log_pz_z = p_z(z_)
+        print(X.shape, "log_pz_z")
         log_pz_z = log_pz_z.reshape(n, -1).sum(1) # sum over timesteps
         
         return log_px_z + log_pz_z + H_qz_q

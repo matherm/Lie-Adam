@@ -15,7 +15,7 @@ from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
 
-__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian']
+__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian', 'kaiser_rule']
 
 EPS = np.finfo(float).eps
 
@@ -50,22 +50,23 @@ def nearest_distances(X, k=1):
     d, _ = knn.kneighbors(X) # the first nearest neighbor is itself
     return d[:, -1] # returns the distance to the kth nearest neighbor
 
+def kaiser_rule(C):
+    eigvals = np.linalg.eigvals(C)
+    eigvals = np.sort(eigvals)[::-1]
+    ltn = eigvals >= 1.0
+    return ltn.astype(np.int32).sum()
 
 def max_entropy_gaussian(C, kaiser=True):
     eigvals = np.linalg.eigvals(C)
     eigvals = np.sort(eigvals)[::-1]
-    if kaiser:
-        ltn = eigvals >= 1.0
-        return ltn.astype(np.int32).sum()
-    else:
-        H = 1/2 + 1/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:1]))
-        for i in range(2, len(eigvals)+1):
-            H_ = i/2 + i/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:i]))
-            if H_ > H:
-                H = H_
-            else:
-                break
-        return i-1
+    H = 1/2 + 1/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:1]))
+    for i in range(2, len(eigvals)+1):
+        H_ = i/2 + i/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:i]))
+        if H_ > H:
+            H = H_
+        else:
+            break
+    return i-1
     
 def entropy_gaussian(C=None, dim=None):
     '''

@@ -342,8 +342,10 @@ class HugeICA(nn.Module):
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
             H_qz_q = 0.
 
-        sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
-        log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        # sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
+        # sigma_per_dim = torch.ones_like(X.flatten()) # add minimal variance
+        # log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1).sum(1)
         log_pz_z = p_z(z_).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
         return -elbo
@@ -453,7 +455,10 @@ class HugeICA(nn.Module):
                 evaluate(ep, train_loss)
         
         if self.whiten:
-            self.set_residuals_std(X)
+            try:
+                self.set_residuals_std(X)
+            except:
+                print("Residuals could not be computed.")
         else:
             print("Residuals cannot be computed when whiten=False")
         
