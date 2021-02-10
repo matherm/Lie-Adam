@@ -1,6 +1,6 @@
+from .data import *
 from .helpers import *
 from .optim import *
-from .data import *
 from .nn import *
 from .HugeICA import *
 from .SpatialHugeICA import *
