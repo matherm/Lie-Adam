@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 
 class SFA():
 
-    def  __init__(self, n_components = 30, slow_components = 2, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x):
+    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
-        self.slow_components = slow_components
+        self.remove_components = remove_components
         self.ica = ica
         self.shape = shape
         self.BSZ = BSZ
@@ -22,16 +22,20 @@ class SFA():
         self.act = act
         self.dim = self.shape[0]*np.prod(self.BSZ)
 
-        if self.n_components == -1:
+        if type(self.n_components) == int and self.n_components == -1:
             self.n_components = self.dim
             
         if type(self.n_components) == float:
             self.n_components = int(self.dim * self.n_components)
 
 
-    def init_model(self, n_components):
+    def init_model(self, n_components, bs):
         if n_components == "kaiser":
             n_components = self.dim
+
+        if n_components > bs:
+            print(f"n_components={n_components} > bs={bs}. Setting n_components={bs}")
+            n_components = bs
 
         self.model = SpatialICA(shape=self.shape, 
                            BSZ=self.BSZ, 
@@ -51,14 +55,10 @@ class SFA():
             print("Setting epochs to 1, as self.ica is False")
             epochs = 1
 
-        if type(self.n_components) == int and self.n_components > bs:
-            print(f"n_components={self.n_components} > bs={bs}. Setting to n_components={bs}")
-            self.n_components = bs
-
         ####################################
         # TiledICA
         ###################################
-        self.init_model(self.n_components)
+        self.init_model(self.n_components, bs)
         print(f"Fit SpatialICA({self.n_components}).")
         self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
@@ -71,7 +71,7 @@ class SFA():
         if self.n_components == "kaiser":
            n_positive_eigvals = kaiser_rule(self.model.cov)
            self.n_components = n_positive_eigvals
-           self.init_model(self.n_components)
+           self.init_model(self.n_components, bs)
            print(f"Re-Fit SpatialICA({self.n_components}).")
            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
            self.model.cpu()
@@ -109,6 +109,7 @@ class SFA():
             self.change_variance_ = self.sfa.var[slow_idx]
             self.slow_components = self.n_components
         else:
+            self.slow_components = self.n_components - self.remove_components
             slow_idx = np.argsort(self.sfa.explained_variance_)
             if self.mode == "slow":
                 self.T = self.sfa.components[:, slow_idx[:self.slow_components]]
@@ -179,7 +180,7 @@ class SFA():
             return auc
 
         def lhd(model, X_in, X_out, mean, std):
-            print(X_in.shape, X_out.shape)
+            # print(X_in.shape, X_out.shape)
             ins_lhd = bpd_pca_elbo(model, X_in, mean, std)
             outs_lhd = bpd_pca_elbo(model, X_out, mean, std)
             auc = roc_auc_score([0] * len(X_in) + [1] * len(X_out), np.concatenate([ins_lhd, outs_lhd]))
@@ -216,7 +217,7 @@ class SFA():
                                         BSZ=(p, p), 
                                         stride=s, 
                                         n_components=c,
-                                        slow_components=c if remove_components is None else c - remove_components,
+                                        remove_components=remove_components,
                                         ica = ica)
                         model.fit(X_, epochs, bs=bs, logging=logging)
                         S = model.transform(np.asarray(X), agg="sum")
@@ -247,7 +248,7 @@ class SFA():
                                 k_min, k_max, k, bpd, bpd_field, \
                                     H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, CE_gaussian, \
                                     var_diff, var_sum, KL, d_ruska, d_ruska_, negH_diff, H_max, auc_lhd] + auc )
-                    except:
+                    except NameError:
                         e = sys.exc_info()[0]
                         v = sys.exc_info()[1]
                         print("Error in config:", p, s, c, "- caused by ", e, v)
