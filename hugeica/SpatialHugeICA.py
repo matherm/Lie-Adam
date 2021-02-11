@@ -232,7 +232,7 @@ class SpatialICA(HugeICA):
         log_px_z = log_px_z.reshape(n, -1).sum(1)
 
         log_pz_z = p_z(z_)
-        print(X.shape, "log_pz_z")
+        # print(X.shape, "log_pz_z")
         log_pz_z = log_pz_z.reshape(n, -1).sum(1) # sum over timesteps
         
         return log_px_z + log_pz_z + H_qz_q
