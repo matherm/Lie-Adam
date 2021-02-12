@@ -184,7 +184,9 @@ class HugeICA(nn.Module):
     
     @property
     def mixing_matrix(self):
-        return np.linalg.pinv(self.unmixing_matrix)
+        if not hasattr(self, "mixing_matrix_"):
+            self.mixing_matrix_ = np.linalg.pinv(self.unmixing_matrix)
+        return self.mixing_matrix_
 
     @property
     def sphering_matrix(self, numpy=True):
@@ -207,6 +209,8 @@ class HugeICA(nn.Module):
 
     @property
     def cov(self): 
+        if hasattr(self, "cov_"):
+            return self.cov_
         total_var = self.var.sum()
         explain_var = self.explained_variance_.sum()
         d, k = self.d, self.n_components
@@ -215,7 +219,8 @@ class HugeICA(nn.Module):
         else:
             sigma = 0.
         W = self.components
-        return (W @ np.diag(self.explained_variance_ - sigma) @ W.T) + np.eye(d) * sigma
+        self.cov_ = (W @ np.diag(self.explained_variance_ - sigma) @ W.T) + np.eye(d) * sigma
+        return self.cov_
 
     @property
     def mu(self):
@@ -405,6 +410,8 @@ class HugeICA(nn.Module):
             self.net = Net(self.d, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
             self.reset(lr)
           
+        print(f"# Fit HugeICA(({dataset_size}, {self.d}, {self.n_components}), device='{self.device}')")
+        
         def fit(ep):
             if ep == 0 and logging > 0:
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
@@ -454,13 +461,13 @@ class HugeICA(nn.Module):
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
         
-        if self.whiten:
-            try:
-                self.set_residuals_std(X)
-            except:
-                print("Residuals could not be computed.")
-        else:
-            print("Residuals cannot be computed when whiten=False")
+        # if self.whiten:
+        #     try:
+        #         self.set_residuals_std(X)
+        #     except:
+        #         print("Residuals could not be computed.")
+        # else:
+        #     print("Residuals cannot be computed when whiten=False")
         
         # if self.history[-1][6] > 1e-3:
         #    print(f"Training did non converge. Gradient norm was", self.history[-1][6])

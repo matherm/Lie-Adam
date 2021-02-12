@@ -34,10 +34,10 @@ class SFA():
             n_components = self.dim
 
         if n_components > bs:
-            print(f"n_components={n_components} > bs={bs}. Setting n_components={bs}")
+            print(f"Warning: n_components={n_components} > bs={bs}. Setting n_components={bs}")
             n_components = bs
 
-        self.model = SpatialICA(shape=self.shape, 
+        model = SpatialICA(shape=self.shape, 
                            BSZ=self.BSZ, 
                            padding=0, 
                            stride=self.stride, 
@@ -46,20 +46,21 @@ class SFA():
                            optimistic_whitening_rate=1000, 
                            whitening_strategy="batch", 
                            reduce_lr=True)
+        return model
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2):
         ####################################
         # Input validation
         ###################################
         if not self.ica and epochs > 1:
-            print("Setting epochs to 1, as self.ica is False")
+            print("Warning: Setting epochs to 1, as self.ica is False")
             epochs = 1
 
         ####################################
         # TiledICA
         ###################################
-        self.init_model(self.n_components, bs)
-        print(f"Fit SpatialICA({self.n_components}).")
+        self.model = self.init_model(self.n_components, bs)
+        print(f"# Fit SpatialICA({self.n_components}).")
         self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
         
@@ -69,10 +70,10 @@ class SFA():
         # Transform
         ###################################
         if self.n_components == "kaiser":
-           n_positive_eigvals = kaiser_rule(self.model.cov)
+           n_positive_eigvals = kaiser_rule(None, eigvals=self.model.explained_variance_)
            self.n_components = n_positive_eigvals
-           self.init_model(self.n_components, bs)
-           print(f"Re-Fit SpatialICA({self.n_components}).")
+           self.model = self.init_model(self.n_components, bs)
+           print(f"# Re-Fit SpatialICA({self.n_components}).")
            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
            self.model.cpu()
            S = self.model.transform(np.asarray(X), agg="none", bs=bs, act=self.act)
@@ -80,15 +81,14 @@ class SFA():
            S = self.model.transform(np.asarray(X), agg="none", bs=bs, act=self.act)
         
         # Compute some Information measures
-        print("# Compute some Information measures")
-        print(f"Compute ICA metrics.")
+        print(f"# Compute ICA metrics.")
         if self.dim > 100*100*3:
-            print(f"Not computing cov(dim={self.dim}).")
+            print(f"Warning: Not computing cov(dim={self.dim}).")
             self.H_receptive       =  np.nan
             self.H_signal          =  np.nan
         else:
             self.H_receptive       =  entropy_gaussian(self.model.cov)
-            self.H_signal          =  entropy_gaussian(self.model.cov, self.n_components)
+            self.H_signal          =  entropy_gaussian(self.model.cov, self.n_components, eigvals=self.model.explained_variance_)
         self.H_signal_white    =  entropy_gaussian(dim=self.n_components)
         self.H_signal_sparse   = -Loss.LogcoshNormalized(torch.FloatTensor(S.reshape(-1, self.n_components))).sum(1).mean(0).numpy()
         self.H_signal_gauss    = -Loss.Gaussian(torch.FloatTensor(S.reshape(-1, self.n_components))).sum(1).mean(0).numpy()
@@ -101,7 +101,7 @@ class SFA():
         S_change_score = S_change_score_diff.reshape(len(S), -1)
         
         self.sfa = HugeICA(self.n_components)
-        print(f"Fit SFA({self.n_components}).")
+        print(f"# Fit SFA({self.n_components}).")
         self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
         if self.mode == "none":
             slow_idx = np.argsort(self.sfa.var)
@@ -151,7 +151,7 @@ class SFA():
         # Decorrelation
         ####################################
         if self.temporal_decorr:
-            print(f"Fit Decorr({self.slow_components}).")
+            print(f"# Fit Decorr({self.slow_components}).")
             t = S.shape[1]
             self.T_temp = []
             for c in range(self.slow_components):

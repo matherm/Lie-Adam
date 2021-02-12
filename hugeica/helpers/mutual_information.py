@@ -50,8 +50,9 @@ def nearest_distances(X, k=1):
     d, _ = knn.kneighbors(X) # the first nearest neighbor is itself
     return d[:, -1] # returns the distance to the kth nearest neighbor
 
-def kaiser_rule(C):
-    eigvals = np.linalg.eigvals(C)
+def kaiser_rule(C, eigvals=[]):
+    if len(eigvals) == 0:
+        eigvals = np.linalg.eigvals(C)
     eigvals = np.sort(eigvals)[::-1]
     ltn = eigvals >= 1.0
     return ltn.astype(np.int32).sum()
@@ -68,7 +69,7 @@ def max_entropy_gaussian(C, kaiser=True):
             break
     return i-1
     
-def entropy_gaussian(C=None, dim=None):
+def entropy_gaussian(C=None, dim=None, eigvals=[]):
     '''
     Entropy of a gaussian variable with covariance matrix C
     '''
@@ -77,7 +78,8 @@ def entropy_gaussian(C=None, dim=None):
     if C is None and dim is not None:
         return .5*dim*(1 + np.log(2*pi))
     if C is not None and dim is not None:
-        eigvals = np.linalg.eigvals(C)
+        if len(eigvals) == 0:
+            eigvals = np.linalg.eigvals(C)
         eigvals = np.abs(np.sort(eigvals)[::-1])
         return  dim/2 + dim/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:dim]))
     n = C.shape[0] # dimension
