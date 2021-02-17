@@ -40,7 +40,7 @@ class HugeICA(nn.Module):
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="negexp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False):
+    def __init__(self, n_components, whiten=True, loss="negexp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False, bs=100000):
         super().__init__()
 
         if whitening_strategy not in ["GHA", "batch"]:
@@ -62,7 +62,8 @@ class HugeICA(nn.Module):
         self.optimitzer = optimizer
         self.optim = None
         self.history = []
-        self._reduce_lr = reduce_lr
+        self.reduce_lr = reduce_lr
+        self.bs = bs
         self.K = torch.ones(n_components)
         if loss == "logcosh":
             self.G = Loss.Logcosh
@@ -153,8 +154,8 @@ class HugeICA(nn.Module):
             self.optim = LBFGS_Lie(gens, lr=lr, line_search_fn="strong_wolfe")
         self.to(self.device)
 
-    def reduce_lr(self, by=1e-1):
-        if self.optim is not None and self._reduce_lr:
+    def _reduce_lr(self, by=1e-1):
+        if self.optim is not None and self.reduce_lr:
             for param in self.optim.param_groups:
                 param["lr"] = param["lr"] * by
 
@@ -178,9 +179,11 @@ class HugeICA(nn.Module):
     
     @property
     def unmixing_matrix(self, numpy=True):
-        W_white = self.net.whiten.sphering_matrix 
-        W_rot = self.net.ica.components_.T 
-        return (W_white @ W_rot).cpu().detach().numpy()
+        if not hasattr(self, "unmixing_matrix_"):
+            W_white = self.net.whiten.sphering_matrix 
+            W_rot = self.net.ica.components_.T 
+            self.unmixing_matrix_ = (W_white @ W_rot).cpu().detach().numpy()
+        return self.unmixing_matrix_
     
     @property
     def mixing_matrix(self):
@@ -242,13 +245,13 @@ class HugeICA(nn.Module):
         if not torch.is_tensor(X):
             return self.transform(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
-        return self.net(X.to(device))
+        return torch.cat([self.net(X[i:i+self.bs].to(device)) for i in range(0, len(X), self.bs)])
 
     def forward(self, X):
         if not torch.is_tensor(X):
             return self.forward(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
-        return self.net(X.to(device))
+        return torch.cat([self.net(X[i:i+self.bs].to(device)) for i in range(0, len(X), self.bs)])
 
     def predict(self, X, sample_scale=0.):
         """
@@ -260,15 +263,14 @@ class HugeICA(nn.Module):
         A = torch.FloatTensor(self.unmixing_matrix).to(X.device)
         A_ = torch.FloatTensor(self.mixing_matrix).to(X.device)
         mu = torch.FloatTensor(self.mu).to(X.device)
-        z = (X - mu) @ A 
+        z = torch.cat([(X[i:i+self.bs] - mu) @ A for i in range(0, len(X), self.bs)])
         if sample_scale > 0.:
             z_ = torch.distributions.Normal(z.flatten(), sample_scale).sample((1,)).view(z.shape)
-            X_ = (z_ @ A_) + mu
+            X_ = torch.cat([(z_[i:i+self.bs] @ A_) + mu for i in range(0, len(z_), self.bs)])
             return X_, z, z_
         else:
-            X_ = (z @ A_) + mu
+            X_ = torch.cat([(z[i:i+self.bs] @ A_) + mu for i in range(0, len(z), self.bs)])
             return X_, z, z
-
 
     def set_residuals_std(self, X):
         """
@@ -341,7 +343,7 @@ class HugeICA(nn.Module):
         d, k = self.d, self.n_components
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            H_qz_q = entropy_gaussian(np.eye(k))
+            H_qz_q = entropy_gaussian(dim=k)
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(z.shape).reshape(-1, k).sum(1)
         else:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
@@ -418,7 +420,7 @@ class HugeICA(nn.Module):
             else:
                 iterator = zip(dataloader, range(len(dataloader)))
             if ep == int(0.9 * epochs):
-                self.reduce_lr()
+                self._reduce_lr()
             losses = 0.
             for batch, _ in iterator:
                 data, label = batch[0].to(self.device), None              

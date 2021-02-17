@@ -61,7 +61,7 @@ class SpatialICA(HugeICA):
         return i2col/i2col.std(1, keepdims=True)
 
     
-    def transform(self, X, exponent=1, agg="mean", bs=-1, act=lambda x : x):
+    def transform(self, X, exponent=1, agg="mean", act=lambda x : x):
         """
         Transforms the data matrix X spatially.
 
@@ -75,13 +75,11 @@ class SpatialICA(HugeICA):
         """ 
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
-            return self.transform(torch.FloatTensor(X).to(device), exponent=exponent, agg=agg, bs=bs, act=act).cpu().detach().numpy()
+            return self.transform(torch.FloatTensor(X).to(device), exponent=exponent, agg=agg, act=act).cpu().detach().numpy()
         n_components = self.n_components
-        if bs < 0:
-            bs = len(X)
         if isinstance(self.net, Net2d):
             device = next(self.parameters()).device
-            s = torch.cat([self.net.transform(X[i:i+bs].to(device)) for i in range(0, len(X), bs)], dim=0) # transform the patches
+            s = torch.cat([self.net.transform(X[i:i+self.bs].to(device)) for i in range(0, len(X), self.bs)], dim=0) # transform the patches
             s = torch.pow(s, exponent=exponent)
             s = act(s)
             s = s.reshape(len(s), -1, n_components)
@@ -92,7 +90,7 @@ class SpatialICA(HugeICA):
             n_patches = len(X_)
             # see: https://stackoverflow.com/questions/59520967/super-keyword-doesnt-work-properly-in-list-comprehension
             sup_transform = super().transform 
-            s = torch.cat([sup_transform(X_[i:i+bs]) for i in range(0, len(X_), bs)], dim=0) # transform the patches
+            s = torch.cat([sup_transform(X_[i:i+self.bs]) for i in range(0, len(X_), self.bs)], dim=0) # transform the patches
             s = torch.pow(s, exponent=exponent)
             s = act(s)
             s = s[im2colOrder(n_images, n_patches)]         # reorder such that patches of same image are consecutive
@@ -209,7 +207,7 @@ class SpatialICA(HugeICA):
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
             z = z[im2colOrder(n_images, len(z))]
             z_ = z_[im2colOrder(n_images, len(z))]
-            H_qz_q = entropy_gaussian(np.eye(k*n_tiles))
+            H_qz_q = entropy_gaussian(dim=k*n_tiles)
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(n, -1).sum(1)
         else:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)

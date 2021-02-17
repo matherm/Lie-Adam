@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 
 class SFA():
 
-    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x):
+    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x, bs=10000, max_components=100000000):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
+        self.max_components = max_components
         self.remove_components = remove_components
         self.ica = ica
         self.shape = shape
@@ -29,13 +30,13 @@ class SFA():
             self.n_components = int(self.dim * self.n_components)
 
 
-    def init_model(self, n_components, bs):
+    def init_model(self, n_components, bs, max_components):
         if n_components == "kaiser":
             n_components = self.dim
 
-        if n_components > bs:
-            print(f"Warning: n_components={n_components} > bs={bs}. Setting n_components={bs}")
-            n_components = bs
+        if n_components > np.min([max_components, bs]):
+            print(f"Warning: n_components={n_components} > np.min([max_components={max_components},bs={bs}]). Setting n_components={np.min([max_components, bs])}")
+            n_components =  np.min([max_components, bs])
 
         model = SpatialICA(shape=self.shape, 
                            BSZ=self.BSZ, 
@@ -45,7 +46,8 @@ class SFA():
                            loss="negexp", 
                            optimistic_whitening_rate=1000, 
                            whitening_strategy="batch", 
-                           reduce_lr=True)
+                           reduce_lr=True,
+                           bs=bs)
         return model
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2):
@@ -59,7 +61,7 @@ class SFA():
         ####################################
         # TiledICA
         ###################################
-        self.model = self.init_model(self.n_components, bs)
+        self.model = self.init_model(self.n_components, bs, self.max_components)
         print(f"# Fit SpatialICA({self.n_components}).")
         self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
@@ -72,13 +74,13 @@ class SFA():
         if self.n_components == "kaiser":
            n_positive_eigvals = kaiser_rule(None, eigvals=self.model.explained_variance_)
            self.n_components = n_positive_eigvals
-           self.model = self.init_model(self.n_components, bs)
+           self.model = self.init_model(self.n_components, bs, self.max_components)
            print(f"# Re-Fit SpatialICA({self.n_components}).")
            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
            self.model.cpu()
-           S = self.model.transform(np.asarray(X), agg="none", bs=bs, act=self.act)
+           S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         else:
-           S = self.model.transform(np.asarray(X), agg="none", bs=bs, act=self.act)
+           S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         
         # Compute some Information measures
         print(f"# Compute ICA metrics.")
@@ -100,7 +102,7 @@ class SFA():
         S_change_score_diff = (S.reshape(-1, self.model.n_tiles, self.n_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
         S_change_score = S_change_score_diff.reshape(len(S), -1)
         
-        self.sfa = HugeICA(self.n_components)
+        self.sfa = HugeICA(self.n_components, bs=bs)
         print(f"# Fit SFA({self.n_components}).")
         self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
         if self.mode == "none":
@@ -118,8 +120,7 @@ class SFA():
                 self.T = self.sfa.components[:, slow_idx[-self.slow_components:]]
                 self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.slow_components:]]
 
-        # Update the indepenendent components
-        print("# Update the indepenendent components")
+        print("# Update the independent components")
         self.model.n_components        = self.slow_components
         self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
 
@@ -127,7 +128,7 @@ class SFA():
         ####################################
         # Transform
         ###################################
-        S = self.model.transform(np.asarray(X), agg="none", bs=bs, act=self.act)
+        S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         S_diff = (S.reshape(-1, self.model.n_tiles, self.n_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
         S_diff = S_diff.reshape(-1, self.n_components)
         # S_diff = np.diff(S, axis=1).reshape(-1, self.n_components)
@@ -161,7 +162,7 @@ class SFA():
 
 
     @staticmethod
-    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=None, logging=-1):
+    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=None, logging=-1, max_components=100000000, compute_bpd=True):
 
         if epochs > 1:
             ica = True
@@ -184,7 +185,7 @@ class SFA():
             ins_lhd = bpd_pca_elbo(model, X_in, mean, std)
             outs_lhd = bpd_pca_elbo(model, X_out, mean, std)
             auc = roc_auc_score([0] * len(X_in) + [1] * len(X_out), np.concatenate([ins_lhd, outs_lhd]))
-            return auc
+            return auc, ins_lhd.mean()
         
         def preprocess(X, X_in, X_out):
             X_, _ = dequantize(X) 
@@ -218,14 +219,17 @@ class SFA():
                                         stride=s, 
                                         n_components=c,
                                         remove_components=remove_components,
-                                        ica = ica)
+                                        ica=ica,
+                                        bs=bs,
+                                        max_components=max_components)
                         model.fit(X_, epochs, bs=bs, logging=logging)
                         S = model.transform(np.asarray(X), agg="sum")
                         for nor in norm:
                             auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in ["var", "sum", "mean"]]
-                            bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
-                            auc_lhd      = lhd(model, X_in, X_out, mean, std)
-                            bpd          = bpd_pca_elbo(model, X_in, mean, std).mean()
+                            bpd_field = auc_lhd = bpd = 0
+                            if compute_bpd:
+                                bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
+                                auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
                             spread = model.change_variance_.max() - model.change_variance_.min()
                             k_min  = model.change_variance_.min()
                             k_max  = model.change_variance_.max()
@@ -248,7 +252,7 @@ class SFA():
                                 k_min, k_max, k, bpd, bpd_field, \
                                     H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, CE_gaussian, \
                                     var_diff, var_sum, KL, d_ruska, d_ruska_, negH_diff, H_max, auc_lhd] + auc )
-                    except NameError:
+                    except:
                         e = sys.exc_info()[0]
                         v = sys.exc_info()[1]
                         print("Error in config:", p, s, c, "- caused by ", e, v)
@@ -284,13 +288,13 @@ class SFA():
 
     def transform(self, X, exponent=1, agg="none", bs=-1, act=lambda x : x):
         if self.temporal_decorr:
-            S = self.model.transform(X, exponent=exponent, agg="none", bs=bs, act=act)
+            S = self.model.transform(X, exponent=exponent, agg="none", act=act)
             for c in range(self.slow_components):
                 klt = self.T_temp[c]
                 S[:, :, c] = klt.transform(S[:, :, c]) 
             S = self.model.agg(S, agg)
         else:
-            S = self.model.transform(X, exponent=exponent, agg=agg, bs=bs, act=act)
+            S = self.model.transform(X, exponent=exponent, agg=agg, act=act)
         return S
 
     def martingale(self, X):
