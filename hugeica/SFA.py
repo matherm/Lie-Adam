@@ -102,27 +102,31 @@ class SFA():
         S_change_score_diff = (S.reshape(-1, self.model.n_tiles, self.n_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
         S_change_score = S_change_score_diff.reshape(len(S), -1)
         
-        self.sfa = HugeICA(self.n_components, bs=bs)
         print(f"# Fit SFA({self.n_components}).")
+        self.sfa = HugeICA(self.n_components, bs=bs)
         self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
-        if self.mode == "none":
-            slow_idx = np.argsort(self.sfa.var)
-            self.T = np.eye(self.n_components).astype(np.float32)[:, slow_idx]
-            self.change_variance_ = self.sfa.var[slow_idx]
-            self.slow_components = self.n_components
-        else:
-            self.slow_components = self.n_components - self.remove_components
-            slow_idx = np.argsort(self.sfa.explained_variance_)
-            if self.mode == "slow":
-                self.T = self.sfa.components[:, slow_idx[:self.slow_components]]
-                self.change_variance_ = self.sfa.explained_variance_[slow_idx[:self.slow_components]]
-            if self.mode == "fast":
-                self.T = self.sfa.components[:, slow_idx[-self.slow_components:]]
-                self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.slow_components:]]
-
-        print("# Update the independent components")
-        self.model.n_components        = self.slow_components
-        self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
+        self.change_variance_ = self.sfa.var
+        self.slow_components = self.n_components - self.remove_components
+        slow_idx = np.argsort(self.sfa.explained_variance_)
+        if self.mode == "slow":
+            print("# Update the independent components")
+            self.T = self.sfa.components[:, slow_idx[:self.slow_components]]
+            self.change_variance_ = self.sfa.explained_variance_[slow_idx[:self.slow_components]]
+            self.model.n_components        = self.slow_components
+            self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
+        if self.mode == "fast":
+            print("# Update the independent components")
+            self.T = self.sfa.components[:, slow_idx[-self.slow_components:]]
+            self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.slow_components:]]
+            self.model.n_components        = self.slow_components
+            self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
+        #if self.mode is not "none":
+            # if self.remove_components == None:
+            #     slow_idx = np.argsort(self.sfa.var)
+            #     self.T = np.eye(self.n_components).astype(np.float32)[:, slow_idx]
+            #     self.change_variance_ = self.sfa.var[slow_idx]
+            #     self.slow_components = self.n_components
+            # else:
 
 
         ####################################
@@ -143,8 +147,8 @@ class SFA():
         self.var                = S.mean(1).var(0).mean() # variance of output
         self.negH_diff          = neg_diff(S_diff)
         self.CE_gaussian        = -Loss.Gaussian(torch.FloatTensor(S_diff)).sum(1).mean(0).numpy()
-        self.d_ruska            = np.abs(self.H_neighbor - self.H_signal_white)
-        self.d_ruska_           = self.H_neighbor - self.H_signal_white
+        self.d_ruzsa            = np.abs(self.H_neighbor - self.H_signal_white)
+        self.d_ruzsa_           = self.H_neighbor - self.H_signal_white
         self.KL                 = self.CE_gaussian - self.H_neighbor
         self.H_max              = self.H_receptive/(self.shape[0]*np.prod(self.BSZ)) + (self.H_neighbor/self.n_components) 
         
@@ -162,7 +166,7 @@ class SFA():
 
 
     @staticmethod
-    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=None, logging=-1, max_components=100000000, compute_bpd=True):
+    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=0, logging=-1, max_components=100000000, compute_bpd=True, mode="none"):
 
         if epochs > 1:
             ica = True
@@ -221,7 +225,8 @@ class SFA():
                                         remove_components=remove_components,
                                         ica=ica,
                                         bs=bs,
-                                        max_components=max_components)
+                                        max_components=max_components,
+                                        mode=mode)
                         model.fit(X_, epochs, bs=bs, logging=logging)
                         S = model.transform(np.asarray(X), agg="sum")
                         for nor in norm:
@@ -244,24 +249,25 @@ class SFA():
                             negH_diff    = model.negH_diff
                             KL           = model.KL
                             H_max        = model.H_max
-                            d_ruska      = model.d_ruska
-                            d_ruska_      = model.d_ruska_
+                            d_ruzsa      = model.d_ruzsa
+                            d_ruzsa_      = model.d_ruzsa_
                             var_diff     = model.var_diff
                             var_sum      = model.var
                             bookkeeping.append([p, s, model.n_components, nor, \
                                 k_min, k_max, k, bpd, bpd_field, \
                                     H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, CE_gaussian, \
-                                    var_diff, var_sum, KL, d_ruska, d_ruska_, negH_diff, H_max, auc_lhd] + auc )
+                                    var_diff, var_sum, KL, d_ruzsa, d_ruzsa_, negH_diff, H_max, auc_lhd] + auc )
                     except:
                         e = sys.exc_info()[0]
                         v = sys.exc_info()[1]
                         print("Error in config:", p, s, c, "- caused by ", e, v)
                         
         bookkeeping = np.asarray(bookkeeping).astype(np.float32)
-        return pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", \
+        hyp = pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", \
                                     "k_min", "k_max", "k", "bpd", "bpd_field", \
                                         "H_receptive", "H_signal", "H_signal_white", "H_neighbor", "H_signal_sparse", "H_signal_gauss", "CE_gaussian", \
-                                            "var_diff", "var_sum", "KL", "d_ruska", "d_ruska_", "negH_diff", "H_max", "lhd" ,"var", "sum", "mean"])       
+                                            "var_diff", "var_sum", "KL", "d_ruzsa", "d_ruzsa_", "negH_diff", "H_max", "lhd" ,"var", "sum", "mean"])       
+        return hyp
          
 
     
