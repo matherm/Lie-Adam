@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 class SFA():
 
-    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000):
+    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000,  use_conv=False):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
@@ -16,7 +16,9 @@ class SFA():
         self.remove_components = remove_components
         self.ica = ica
         self.shape = shape
+        self.use_conv = use_conv
         self.BSZ = BSZ
+        self.n_tiles =  ((shape[1] - BSZ[0]) // stride + 1)**2
         self.stride = stride
         self.mode = mode
         self.temporal_decorr = temporal_decorr
@@ -29,7 +31,7 @@ class SFA():
         if type(self.n_components) == float:
             self.n_components = int(self.dim * self.n_components)
 
-
+    
     def init_model(self, n_components, bs, max_components):
         if n_components == "kaiser" or n_components == "mle":
             n_components = self.dim
@@ -51,7 +53,7 @@ class SFA():
                            ica=self.ica)
         return model
     
-    def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2, use_conv=False):
+    def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2):
         ####################################
         # Input validation
         ###################################
@@ -62,11 +64,12 @@ class SFA():
         ####################################
         # TiledICA
         ###################################
-        self.model = self.init_model(self.n_components, bs, self.max_components)
         print(f"# Fit SpatialICA({self.n_components}).")
-        if use_conv:
-            self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+        if self.use_conv:
+            self.model = self.init_model(self.n_components, int(np.clip(bs//self.n_tiles,32, np.inf)), self.max_components)
+            self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs//self.n_tiles,32, np.inf)))
         else:
+            self.model = self.init_model(self.n_components, bs, self.max_components)
             self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
         
@@ -77,11 +80,12 @@ class SFA():
         ###################################
         if self.n_components == "kaiser" or self.n_components == "mle":
             self.n_components = kaiser_rule(None, eigvals=self.model.explained_variance_) if self.n_components == "kaiser" else mle_rule(self.model.explained_variance_, len(X))
-            self.model = self.init_model(self.n_components, bs, self.max_components)
             print(f"# Re-Fit SpatialICA({self.n_components}).")
-            if use_conv:
-                self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+            if self.use_conv:
+                self.model = self.init_model(self.n_components, int(np.clip(bs//self.n_tiles,32, np.inf)), self.max_components)
+                self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs//self.n_tiles,32, np.inf)))
             else:
+                self.model = self.init_model(self.n_components, bs, self.max_components)
                 self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
             self.model.cpu()
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
@@ -175,7 +179,7 @@ class SFA():
 
 
     @staticmethod
-    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=0, logging=-1, max_components=100000000, compute_bpd=True, mode="none"):
+    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, epochs=1, norm=[1], remove_components=0, logging=-1, max_components=100000000, compute_bpd=True, mode="none", use_conv=False):
 
         if epochs > 1:
             ica = True
@@ -234,7 +238,8 @@ class SFA():
                                         remove_components=remove_components,
                                         ica=ica,
                                         max_components=max_components,
-                                        mode=mode)
+                                        mode=mode,
+                                        use_conv=use_conv)
                         model.fit(X_, epochs, bs=bs, logging=logging)
                         S = model.transform(np.asarray(X), agg="sum")
                         for nor in norm:

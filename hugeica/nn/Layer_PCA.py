@@ -134,7 +134,7 @@ class F_Batch_PCA_2d(Function):
         
         # Gradient w.r.t. weights # Gradient w.r.t. bias
         n_components_ = weight.shape[0]
-        n_samples_seen_, ds_size, n_samples = ups_ds_size[0].item(), ups_ds_size[1].item(), len(inpt)
+        n_samples_seen_, ds_size, n_samples = ups_ds_size[0].clone(), ups_ds_size[1].clone(), len(inpt) # we need .clone() because o.w. new_bias would already get the new value
         T = ((H - filter_size) // stride.item() + 1)**2
 
         if n_samples_seen_ < ds_size*T and updating > 0.:
