@@ -72,7 +72,7 @@ class F_SO_2d(Function):
         # Gradient w.r.t. weights
         grad_weight = F.grad.conv2d_weight(grad_output=grad_output, input=inpt, stride=stride.item(), weight_size=kernel.shape)
         # unroll the weights
-        grad_weight = grad_weight.contiguous().view(grad_weight.shape[0], -1)
+        grad_weight = grad_weight.view(weight.shape).contiguous()
         grad_lie = lie_bracket(weight, grad_weight)
         return grad_input, grad_lie, None, None, None
 

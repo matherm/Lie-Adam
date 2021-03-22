@@ -14,8 +14,9 @@ from scipy.linalg import det
 from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
+from sklearn.decomposition.pca import _infer_dimension_
 
-__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian', 'kaiser_rule']
+__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian', 'kaiser_rule', "mle_rule"]
 
 EPS = np.finfo(float).eps
 
@@ -49,6 +50,12 @@ def nearest_distances(X, k=1):
     knn.fit(X)
     d, _ = knn.kneighbors(X) # the first nearest neighbor is itself
     return d[:, -1] # returns the distance to the kth nearest neighbor
+
+
+def mle_rule(eigvals, n_samples):
+    k = _infer_dimension_(eigvals, n_samples, len(eigvals))
+    return k
+
 
 def kaiser_rule(C, eigvals=[]):
     if len(eigvals) == 0:

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 class SFA():
 
-    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x, bs=10000, max_components=100000000):
+    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000):
         assert mode in ["slow", "fast", "none"]
 
         self.n_components = n_components
@@ -31,13 +31,13 @@ class SFA():
 
 
     def init_model(self, n_components, bs, max_components):
-        if n_components == "kaiser":
+        if n_components == "kaiser" or n_components == "mle":
             n_components = self.dim
 
         if n_components > np.min([max_components, bs]):
             print(f"Warning: n_components={n_components} > np.min([max_components={max_components},bs={bs}]). Setting n_components={np.min([max_components, bs])}")
             n_components =  np.min([max_components, bs])
-
+            
         model = SpatialICA(shape=self.shape, 
                            BSZ=self.BSZ, 
                            padding=0, 
@@ -47,10 +47,11 @@ class SFA():
                            optimistic_whitening_rate=1000, 
                            whitening_strategy="batch", 
                            reduce_lr=True,
-                           bs=bs)
+                           bs=bs,
+                           ica=self.ica)
         return model
     
-    def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2):
+    def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2, use_conv=False):
         ####################################
         # Input validation
         ###################################
@@ -63,24 +64,30 @@ class SFA():
         ###################################
         self.model = self.init_model(self.n_components, bs, self.max_components)
         print(f"# Fit SpatialICA({self.n_components}).")
-        self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+        if use_conv:
+            self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+        else:
+            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
         self.model.cpu()
         
-        if not self.ica:
-            self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
+        #if not self.ica:
+            #self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
         ####################################
         # Transform
         ###################################
-        if self.n_components == "kaiser":
-           n_positive_eigvals = kaiser_rule(None, eigvals=self.model.explained_variance_)
-           self.n_components = n_positive_eigvals
-           self.model = self.init_model(self.n_components, bs, self.max_components)
-           print(f"# Re-Fit SpatialICA({self.n_components}).")
-           self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
-           self.model.cpu()
-           S = self.model.transform(np.asarray(X), agg="none", act=self.act)
+        if self.n_components == "kaiser" or self.n_components == "mle":
+            self.n_components = kaiser_rule(None, eigvals=self.model.explained_variance_) if self.n_components == "kaiser" else mle_rule(self.model.explained_variance_, len(X))
+            self.model = self.init_model(self.n_components, bs, self.max_components)
+            print(f"# Re-Fit SpatialICA({self.n_components}).")
+            if use_conv:
+                self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+            else:
+                self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
+            self.model.cpu()
+            S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         else:
-           S = self.model.transform(np.asarray(X), agg="none", act=self.act)
+            self.n_components = self.model.n_components
+            S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         
         # Compute some Information measures
         print(f"# Compute ICA metrics.")
@@ -143,14 +150,16 @@ class SFA():
 
         # Compute some Information measures 
         self.H_neighbor         = entropy_gaussian(self.sfa.cov)
-        self.var_diff           = S_change_score_diff.reshape(len(S), -1).var(0).sum() # variance of diffs
-        self.var                = S.mean(1).var(0).mean() # variance of output
-        self.negH_diff          = neg_diff(S_diff)
+        self.var_diff           =  S_change_score_diff.reshape(len(S), -1).var(0).mean() # variance of diffs
+        self.var                =  S.mean(1).var(0).mean() # variance of output
+        self.H_output           =  entropy_gaussian(np.cov(S.mean(1).T))
+        self.negH_diff          =  neg_diff(S_diff)
+        self.kurt               =  Loss.K(S_diff).mean()
         self.CE_gaussian        = -Loss.Gaussian(torch.FloatTensor(S_diff)).sum(1).mean(0).numpy()
-        self.d_ruzsa            = np.abs(self.H_neighbor - self.H_signal_white)
-        self.d_ruzsa_           = self.H_neighbor - self.H_signal_white
-        self.KL                 = self.CE_gaussian - self.H_neighbor
-        self.H_max              = self.H_receptive/(self.shape[0]*np.prod(self.BSZ)) + (self.H_neighbor/self.n_components) 
+        self.d_ruzsa            =  np.abs(self.H_neighbor - self.H_signal_white)
+        self.d_ruzsa_           =  self.H_neighbor - self.H_signal_white
+        self.KL                 =  self.CE_gaussian - self.H_neighbor
+        self.H_max              =  self.H_receptive/(self.shape[0]*np.prod(self.BSZ)) + (self.H_neighbor/self.n_components) 
         
         ####################################
         # Decorrelation
@@ -224,7 +233,6 @@ class SFA():
                                         n_components=c,
                                         remove_components=remove_components,
                                         ica=ica,
-                                        bs=bs,
                                         max_components=max_components,
                                         mode=mode)
                         model.fit(X_, epochs, bs=bs, logging=logging)
@@ -239,6 +247,7 @@ class SFA():
                             k_min  = model.change_variance_.min()
                             k_max  = model.change_variance_.max()
                             k      = model.change_variance_.max()/model.change_variance_.min()
+                            kurt   = model.kurt
                             H_receptive  = model.H_receptive
                             H_neighbor   = model.H_neighbor
                             CE_gaussian  = model.CE_gaussian
@@ -250,13 +259,15 @@ class SFA():
                             KL           = model.KL
                             H_max        = model.H_max
                             d_ruzsa      = model.d_ruzsa
-                            d_ruzsa_      = model.d_ruzsa_
+                            d_ruzsa_     = model.d_ruzsa_
                             var_diff     = model.var_diff
                             var_sum      = model.var
+                            total_var    = model.var * model.n_components
+                            H_output     = model.H_output
                             bookkeeping.append([p, s, model.n_components, nor, \
-                                k_min, k_max, k, bpd, bpd_field, \
+                                k_min, k_max, k, kurt, bpd, bpd_field, \
                                     H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, CE_gaussian, \
-                                    var_diff, var_sum, KL, d_ruzsa, d_ruzsa_, negH_diff, H_max, auc_lhd] + auc )
+                                    var_diff, var_sum, total_var, H_output, KL, d_ruzsa, d_ruzsa_, negH_diff, H_max, auc_lhd] + auc )
                     except:
                         e = sys.exc_info()[0]
                         v = sys.exc_info()[1]
@@ -264,9 +275,9 @@ class SFA():
                         
         bookkeeping = np.asarray(bookkeeping).astype(np.float32)
         hyp = pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", \
-                                    "k_min", "k_max", "k", "bpd", "bpd_field", \
+                                    "k_min", "k_max", "k", "kurt", "bpd", "bpd_field", \
                                         "H_receptive", "H_signal", "H_signal_white", "H_neighbor", "H_signal_sparse", "H_signal_gauss", "CE_gaussian", \
-                                            "var_diff", "var_sum", "KL", "d_ruzsa", "d_ruzsa_", "negH_diff", "H_max", "lhd" ,"var", "sum", "mean"])       
+                                            "var_diff", "var_sum", "total_var", "H_output", "KL", "d_ruzsa", "d_ruzsa_", "negH_diff", "H_max", "lhd" ,"var", "sum", "mean"])       
         return hyp
          
 
@@ -345,8 +356,8 @@ class TAM():
                            reduce_lr=True)
         self.model.fit(X, 1, X_val=X[:100], logging=-1, lr=1e-2, bs=10000)
         
-        if not self.ica:
-            self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
+        #if not self.ica:
+            #self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
 
     def elbo(self, *args, **kwargs):
         return self.model(*args, **kwargs)

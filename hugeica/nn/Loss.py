@@ -176,5 +176,11 @@ class Loss():
 
     @staticmethod
     def mcc(S, S_):
+        """
+        S  (B, n_features)
+        S_ (B, n_features) e.g. S_ = model.layer1(X).transpose(0, 2, 3, 1).reshape(-1, n_features)
+        """
         mcc = np.abs(((S.T/np.linalg.norm(S.T,axis=0)).T @ (S_/np.linalg.norm(S_,axis=0)))).max(1).mean()
         return mcc
+
+

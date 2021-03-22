@@ -8,7 +8,7 @@ from hugeica import *
 
 class Net2d(nn.Module):
 
-    def __init__(self, inpt_shape, out_channels, filter_size, stride, ds_size, whiten):
+    def __init__(self, inpt_shape, out_channels, filter_size, stride, ds_size, whiten, ica):
         super().__init__()
 
         self.inpt = Reshape((-1, *inpt_shape))
@@ -16,8 +16,11 @@ class Net2d(nn.Module):
         self.ica    = SO_Layer2d(out_channels, filter_size=1, stride=1)
         self.transpose = nn.Sequential(Transpose(1, 2), Transpose(2, 3))
         self.output = Reshape((-1, out_channels))
-        if self.whiten:
+        if whiten and ica:
             self.net = nn.Sequential(self.whiten, self.ica)
+        elif whiten and not ica:
+            self.ica.weight.data = torch.eye(self.ica.weight.data.shape[0])
+            self.net = nn.Sequential(self.whiten)
         else:
             self.net = self.ica
 
@@ -384,13 +387,13 @@ class SpatialICA(HugeICA):
 
 
     def fit2d(self, X, epochs, X_val, lr=1e-3, *args, **kwargs):
-        raise NotImplementedError("This one is not implemented yet.")
+        #raise NotImplementedError("This one is not implemented yet.")
         if not torch.is_tensor(X):
             return self.fit2d(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), *args, **kwargs)
 
         if self.net is None:
             self.d = self.shape[0]*self.BSZ[0]**2
-            self.net = Net2d(self.shape, self.n_components, filter_size=self.BSZ[0], stride=self.stride,  ds_size=int(len(X) * self.optimistic_whitening_rate), whiten=self.whiten)
+            self.net = Net2d(self.shape, self.n_components, filter_size=self.BSZ[0], stride=self.stride,  ds_size=int(len(X) * self.optimistic_whitening_rate), whiten=self.whiten, ica=self.ica)
             self.reset(lr)
 
         super().fit(X, epochs, X_val, *args, **kwargs)

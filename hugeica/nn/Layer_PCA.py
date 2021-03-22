@@ -60,7 +60,7 @@ class F_Batch_PCA(Function):
         n_components_ = weight.shape[0]
         n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
 
-        if n_samples_seen_ <= ds_size and updating > 0.:
+        if n_samples_seen_ < ds_size and updating > 0.:
             new_weight, new_S, new_explained_var, new_mean_, new_var_, = batch_pca_update(inpt, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples, n_samples_seen_)
             return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, None, None
         else:
@@ -75,7 +75,7 @@ class Batch_PCA_Layer(nn.Module):
         else:
             self.weight = NoGDParameter(torch.ones(n_out, n_in)/10)
         self.S = NoGDParameter(torch.zeros(n_out))
-        self.bias = NoGDParameter(torch.ones(n_out))
+        self.var_expl = NoGDParameter(torch.ones(n_out))
 
         self.mean_ = NoGDParameter(torch.zeros(n_in))
         self.var_ = NoGDParameter(torch.zeros(n_in))
@@ -86,7 +86,7 @@ class Batch_PCA_Layer(nn.Module):
 
     @property
     def sphering_matrix(self):
-        return self.weight.T.detach() / torch.sqrt(self.bias).detach()
+        return self.weight.T.detach() / torch.sqrt(self.var_expl).detach()
 
     @property
     def components(self):
@@ -94,54 +94,67 @@ class Batch_PCA_Layer(nn.Module):
 
     @property
     def explained_variance_(self):
-        return self.bias.detach()
+        return self.var_expl.detach()
     
     def compute_updates(self, updating=True, ds_size=2):
         self.updating = torch.ones(1) if updating else torch.zeros(1)
         self.ups_ds_size.data[1] = ds_size
 
     def forward(self, X):
-        return F_Batch_PCA.apply(X, self.weight, self.S, self.bias, self.mean_, self.var_, self.ups_ds_size, self.updating)
+        return F_Batch_PCA.apply(X, self.weight, self.S, self.var_expl, self.mean_, self.var_, self.ups_ds_size, self.updating)
 
 class F_Batch_PCA_2d(Function):
 
     @staticmethod
-    def forward(ctx, inpt, weight, S, explained_var, mean_, var_, ups_ds_size, updating, n_components, filter_size, stride):
+    def forward(ctx, inpt, weight, S, explained_var, mean_, var_, bias, ups_ds_size, updating, n_components, filter_size, stride):
         B, C, H, W = inpt.shape
         # rollout the weights
         kernel = weight.view(n_components, C, filter_size, filter_size).clone()
-        ctx.save_for_backward(inpt, weight, kernel, stride, S, explained_var, mean_, var_, ups_ds_size, updating) # save unfolded without mean correction for backward
+        ctx.save_for_backward(inpt, weight, kernel, stride, S, explained_var, mean_, var_, bias, ups_ds_size, updating) # save unfolded without mean correction for backward
         # begin ugly unfold -> mean correction -> fold
-        inpt = F.unfold(inpt, filter_size, dilation=1, padding=1, stride=(stride, stride)) # (B, F*F, n_tiles)
-        inpt = inpt.transpose(1,2).contiguous()
-        inpt = inpt.view(-1, filter_size*filter_size)
-        inpt = inpt - mean_ # mean correction
-        inpt = inpt.view(B, -1, filter_size*filter_size)
-        inpt = inpt.transpose(1, 2).contiguous()
-        inpt = F.fold(inpt, (H, W), filter_size, dilation=1, padding=1, stride=(stride, stride)) # (B, F*F, n_tiles)
+        # inpt = F.unfold(inpt, filter_size, dilation=1, padding=0, stride=(stride, stride)) # (B, C*F*F, n_tiles)
+        # inpt = inpt.transpose(1,2).contiguous()
+        # inpt = inpt.view(-1, C*filter_size*filter_size)
+        # inpt = inpt - mean_ # mean correction
+        # inpt = inpt.view(B, -1, C*filter_size*filter_size)
+        # inpt = inpt.transpose(1, 2).contiguous()
+        # inpt = F.fold(inpt, (H, W), filter_size, dilation=1, padding=0, stride=(stride, stride)) # (B, F*F, n_tiles)
         # end
         outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
-        return  outpt  / torch.sqrt(explained_var).view(1, -1, 1, 1)
+        outpt =  (outpt - bias.view(1, -1, 1, 1)) / torch.sqrt(explained_var).view(1, -1, 1, 1)
+        return outpt
 
     @staticmethod
     def backward(ctx, grad_output):
-        inpt, weight, kernel, stride, S, explained_var, mean_, var_, ups_ds_size, updating = ctx.saved_tensors
+        inpt, weight, kernel, stride, S, explained_var, mean_, var_, bias, ups_ds_size, updating = ctx.saved_tensors
+        B, C, H, W = inpt.shape
         filter_size = kernel.shape[2]
         # Gradient w.r.t. input
         grad_input = F.grad.conv2d_input(grad_output=grad_output, weight=kernel, stride=stride.item(), input_size=inpt.shape)
         
         # Gradient w.r.t. weights # Gradient w.r.t. bias
         n_components_ = weight.shape[0]
-        n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
+        n_samples_seen_, ds_size, n_samples = ups_ds_size[0].item(), ups_ds_size[1].item(), len(inpt)
+        T = ((H - filter_size) // stride.item() + 1)**2
 
-        if n_samples_seen_ <= ds_size and updating > 0.:
-            inpt = F.unfold(inpt, filter_size, dilation=1, padding=1, stride=(stride, stride)) # (B, F*F, n_tiles)
-            inpt = inpt.transpose(1,2).contiguous()
-            inpt = inpt.view(-1, filter_size*filter_size)
-            new_weight, new_S, new_explained_var, new_mean_, new_var_, = batch_pca_update(inpt, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples, n_samples_seen_)
-            return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, None, None, None, None, None
+        if n_samples_seen_ < ds_size*T and updating > 0.:
+            
+            inpt_ = F.unfold(inpt, filter_size, dilation=1, padding=0, stride=(stride, stride)) # (B, F*F, n_tiles)
+            inpt_ = inpt_.transpose(1,2).contiguous()
+            inpt_ = inpt_.view(-1, C*filter_size*filter_size)
+            new_weight, new_S, new_explained_var, new_mean_, new_var_ = batch_pca_update(inpt_, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples * T, n_samples_seen_)
+
+            kernel = new_weight.view(n_components_, C, filter_size, filter_size).clone()
+            outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
+            outpt = outpt.transpose(1,2).transpose(2,3).contiguous().view(-1, n_components_)
+            
+            new_bias, _, _ =  incremental_mean_and_var(
+                                                        outpt, last_mean=bias, last_variance=bias,
+                                                        last_sample_count=n_samples_seen_)
+    
+            return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, new_bias, None, None, None, None, None
         else:
-            return grad_input, weight.clone(), S.clone(), explained_var.clone(), mean_.clone(), var_.clone(), None, None, None, None, None
+            return grad_input, weight.clone(), S.clone(), explained_var.clone(), mean_.clone(), var_.clone(), bias, None, None, None, None, None
 
 class Batch_PCA_Layer2d(nn.Module):
 
@@ -157,7 +170,9 @@ class Batch_PCA_Layer2d(nn.Module):
         else:
             self.weight = NoGDParameter(torch.ones(n_out, n_in)/10)
         self.S = NoGDParameter(torch.zeros(n_out))
-        self.bias = NoGDParameter(torch.ones(n_out))
+        
+        self.var_expl = NoGDParameter(torch.ones(n_out))
+        self.bias = NoGDParameter(torch.zeros(n_out))
 
         self.mean_ = NoGDParameter(torch.zeros(n_in))
         self.var_ = NoGDParameter(torch.zeros(n_in))
@@ -168,7 +183,7 @@ class Batch_PCA_Layer2d(nn.Module):
 
     @property
     def sphering_matrix(self):
-        return self.weight.T.detach() / torch.sqrt(self.bias).detach()
+        return self.weight.T.detach() / torch.sqrt(self.var_expl).detach()
 
     @property
     def components(self):
@@ -176,7 +191,7 @@ class Batch_PCA_Layer2d(nn.Module):
 
     @property
     def explained_variance_(self):
-        return self.bias.detach()
+        return self.var_expl.detach()
     
     def compute_updates(self, updating=True, ds_size=2):
         self.updating = torch.ones(1) if updating else torch.zeros(1)
@@ -188,4 +203,4 @@ class Batch_PCA_Layer2d(nn.Module):
             X : input tensor with shape (B, C, H, W)
         """
         assert X.ndim == 4
-        return F_Batch_PCA_2d().apply(X, self.weight, self.S, self.bias, self.mean_, self.var_, self.ups_ds_size, self.updating, self.n_components, self.filter_size, self.stride)
+        return F_Batch_PCA_2d().apply(X, self.weight, self.S, self.var_expl, self.mean_, self.var_, self.bias, self.ups_ds_size, self.updating, self.n_components, self.filter_size, self.stride)
