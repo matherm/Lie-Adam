@@ -143,14 +143,15 @@ class F_Batch_PCA_2d(Function):
             inpt_ = inpt_.transpose(1,2).contiguous()
             inpt_ = inpt_.view(-1, C*filter_size*filter_size)
             new_weight, new_S, new_explained_var, new_mean_, new_var_ = batch_pca_update(inpt_, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples * T, n_samples_seen_)
+            new_bias = (new_weight @ new_mean_.T).T
 
-            kernel = new_weight.view(n_components_, C, filter_size, filter_size).clone()
-            outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
-            outpt = outpt.transpose(1,2).transpose(2,3).contiguous().view(-1, n_components_)
-            
-            new_bias, _, _ =  incremental_mean_and_var(
-                                                        outpt, last_mean=bias, last_variance=bias,
-                                                        last_sample_count=n_samples_seen_)
+            # kernel = new_weight.view(n_components_, C, filter_size, filter_size).clone()
+            # outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
+            # outpt = outpt.transpose(1,2).transpose(2,3).contiguous().view(-1, n_components_)
+            # 
+            # new_bias, _, _ =  incremental_mean_and_var(
+            #                                             outpt, last_mean=bias, last_variance=bias,
+            #                                             last_sample_count=n_samples_seen_)
     
             return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, new_bias, None, None, None, None, None
         else:
