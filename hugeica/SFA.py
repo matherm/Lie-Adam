@@ -66,8 +66,8 @@ class SFA():
         ###################################
         print(f"# Fit SpatialICA({self.n_components}).")
         if self.use_conv:
-            self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5**0.5, 128, np.inf)), self.max_components)
-            self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 0.528, np.inf)))
+            self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)), self.max_components)
+            self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)))
         else:
             self.model = self.init_model(self.n_components, bs, self.max_components)
             self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs)
