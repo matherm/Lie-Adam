@@ -17,6 +17,9 @@ class Net(nn.Module):
                 self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
             if whitening_strategy == "GHA":
                 self.whiten = HebbianLayer(n_input, n_components, dataset_size)
+        else:
+                self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
+                self.whiten.compute_updates(False)
                 
         if derivative == "lie":
             self.ica    = SO_Layer(n_components)
@@ -27,14 +30,10 @@ class Net(nn.Module):
         else:
             ValueError(f"derivative={derivative} not understood.")
 
-        if whiten and ica:
-            self.layers = nn.Sequential(self.whiten, self.ica)
-        elif whiten and not ica:
+        if not ica:
             self.ica.weight.data = torch.eye(self.ica.weight.data.shape[0])
-            self.layers = nn.Sequential(self.whiten)
-        else:
-            self.layers = nn.Sequential(self.ica)
-
+        self.layers = nn.Sequential(self.whiten, self.ica)
+    
     def forward(self, X):
         return self.layers(X)
         
@@ -308,7 +307,7 @@ class HugeICA(nn.Module):
         
         # Malahanobis
         M = X @ C_inv @ X.T
-        M = M.sum(axis=1).flatten()
+        M = np.diag(M).flatten()
         
         return -0.5*M - 0.5*d*np.log(2*np.pi) - 0.5*logdet(C)
 
@@ -359,7 +358,7 @@ class HugeICA(nn.Module):
         log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1).sum(1)
         log_pz_z = p_z(z_).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
-        return -elbo
+        return elbo
 
     def bpd(self, X):
         return -self.elbo(X) / (np.log(2) * self.d)

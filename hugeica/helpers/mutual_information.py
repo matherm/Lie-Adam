@@ -15,8 +15,10 @@ from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition.pca import _infer_dimension_
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPRegressor
 
-__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_gaussian', 'KL_gaussian', 'kaiser_rule', "mle_rule"]
+__all__= ['entropy', 'mutual_information', 'entropy_gaussian', 'entropy_bins', 'max_entropy_rule', 'KL_gaussian', 'kaiser_rule', "mle_rule", "quantile_rule", "entropy_conditional"]
 
 EPS = np.finfo(float).eps
 
@@ -56,6 +58,13 @@ def mle_rule(eigvals, n_samples):
     k = _infer_dimension_(eigvals, n_samples, len(eigvals))
     return k
 
+def quantile_rule(C, eigvals=[], explained_variance=0.95):
+    if len(eigvals) == 0:
+        eigvals = np.linalg.eigvals(C)
+    eigvals = np.sort(eigvals)[::-1]
+    ratio = np.cumsum(eigvals) / np.sum(eigvals)
+    ltn = ratio < explained_variance
+    return ltn.astype(np.int32).sum()
 
 def kaiser_rule(C, eigvals=[]):
     if len(eigvals) == 0:
@@ -64,7 +73,7 @@ def kaiser_rule(C, eigvals=[]):
     ltn = eigvals >= 1.0
     return ltn.astype(np.int32).sum()
 
-def max_entropy_gaussian(C, kaiser=True):
+def max_entropy_rule(C):
     eigvals = np.linalg.eigvals(C)
     eigvals = np.sort(eigvals)[::-1]
     H = 1/2 + 1/2*np.log(np.pi*2)+0.5*np.sum(np.log(eigvals[:1]))
@@ -80,10 +89,10 @@ def entropy_gaussian(C=None, dim=None, eigvals=[]):
     '''
     Entropy of a gaussian variable with covariance matrix C
     '''
-    if np.isscalar(C): # C is the variance
-        return .5*(1 + np.log(2*pi)) + .5*np.log(C)
     if C is None and dim is not None:
         return .5*dim*(1 + np.log(2*pi))
+    if C.ndim == 0: # C is the variance
+        return .5*(1 + np.log(2*pi)) + .5*np.log(C)
     if C is not None and dim is not None:
         if len(eigvals) == 0:
             eigvals = np.linalg.eigvals(C)
@@ -92,6 +101,18 @@ def entropy_gaussian(C=None, dim=None, eigvals=[]):
     n = C.shape[0] # dimension
     return .5*n*(1 + np.log(2*pi)) + .5*np.linalg.slogdet(C)[1]
     return .5*n*(1 + np.log(2*pi)) + .5*np.log(abs(det(C)))
+
+
+def entropy_conditional(A, B):
+    """
+    returns H[A | B] by fitting a MLP
+    MSE >= 1/2pie e^{2H[A | B]}
+    log MSE >= log (1/2pie) + 2 H[A | B]
+    1/2 (log MSE - log (1/2pie) ) >= H[A|B]
+    """
+    regr = MLPRegressor(random_state=1, max_iter=500, early_stopping=True).fit(B, A)
+    MSE = ((B - regr.predict(B))**2).sum(1).mean(0)
+    return 0.5*(np.log(MSE) - np.log(1/(2*np.pi*np.e)))
 
 
 def joint_entropy(variables, k=1):

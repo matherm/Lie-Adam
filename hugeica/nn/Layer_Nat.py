@@ -46,8 +46,8 @@ class F_SO_Linear_Relative(Function):
         # G = I - outer(y , u)
         G = I - (y.T @ u)
         G = G @ weight
-        #K = torch.mean(grad_output, dim=0) - torch.diag(G)
-        #G = G * torch.sign(K)
+        # K = torch.mean(grad_output, dim=0) - torch.diag(G)
+        # G = G * torch.sign(K)
         G = G - G.T
         return grad_input, -G, None
 
@@ -70,6 +70,7 @@ class F_Linear_Relative(Function):
 
     @staticmethod
     def forward(ctx, inpt, weight, fun):
+        #weight  = weight / torch.norm(weight, dim=1)
         outpt = inpt.mm(weight.T)
         ctx.save_for_backward(inpt, weight, outpt, fun(outpt))
         return outpt
@@ -77,6 +78,7 @@ class F_Linear_Relative(Function):
     @staticmethod
     def backward(ctx, grad_output):
         inpt, weight, output, y = ctx.saved_tensors
+        #weight  = weight / torch.norm(weight, dim=1)
         B = inpt.shape[0]
         grad_input = grad_weight = None
         # Gradient w.r.t. input
@@ -84,18 +86,20 @@ class F_Linear_Relative(Function):
         # Gradient w.r.t. weights
         I = torch.eye(weight.shape[0]).to(weight.device)
         # G = I - outer(y , output)
-        G = I - (y.T @ output)
-        G = G @ weight
+        G = (I - 2*y.T @ output) @ weight / B
+        #G = G @ weight
+        #G = torch.inverse(weight).T  - inpt.T @ y
         #print(grad_output.shape, G.shape)
         #print(torch.mean(grad_output, dim=0, keepdims=True).detach().shape, torch.diag(G).shape)
-        K = torch.mean(grad_output, dim=0, keepdims=True).detach() - torch.diag(G).detach()
+        #K = torch.mean(grad_output, dim=0, keepdims=True).detach() - torch.diag(G).detach()
+        #K = 
         #print(K.shape)
-        G = G * torch.sign(K).detach()
+        #G = G * -torch.sign(Loss.K(y)).detach()
         #G = torch.bmm(G, weight.unsqueeze(0).repeat(B, 1, 1))
         #G = G.mean(0)
         #K = torch.mean(grad_output, dim=0) - torch.diag(G)
         #G = G * torch.sign(K)
-        return grad_input, -G/B, None
+        return grad_input, -G, None
 
 
 class Relative_Gradient(nn.Module):
@@ -107,7 +111,7 @@ class Relative_Gradient(nn.Module):
 
     @property
     def components_(self):
-        return self.weight
+        return self.weight #/ torch.norm(self.weight, dim=1)
 
     def forward(self, X):
         return F_Linear_Relative().apply(X, self.weight, self.fun)

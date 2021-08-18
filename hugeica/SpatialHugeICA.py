@@ -16,14 +16,10 @@ class Net2d(nn.Module):
         self.ica    = SO_Layer2d(out_channels, filter_size=1, stride=1)
         self.transpose = nn.Sequential(Transpose(1, 2), Transpose(2, 3))
         self.output = Reshape((-1, out_channels))
-        if whiten and ica:
-            self.net = nn.Sequential(self.whiten, self.ica)
-        elif whiten and not ica:
+        if not ica:
             self.ica.weight.data = torch.eye(self.ica.weight.data.shape[0])
-            self.net = nn.Sequential(self.whiten)
-        else:
-            self.net = self.ica
-
+        self.net = nn.Sequential(self.whiten, self.ica)
+        
     def transform(self, X):
         return self.transpose(self.net(self.inpt(X)))
 
@@ -50,21 +46,22 @@ class SpatialICA(HugeICA):
         self.stride = stride
         self.padding = padding
         self.n_tiles   = ((shape[1]-BSZ[0])//stride+1)**2
-    
-        self.col2i = lambda X,len_X: torch.FloatTensor(
-                                    col2im(BSZ=self.BSZ, agg="avg", cols=X.cpu().numpy().T, x_shape=(len_X, *shape), padding=self.padding, stride=self.stride)
+
+    def col2i(self, X, len_X):
+        col2i = torch.FloatTensor(
+                                    col2im(BSZ=self.BSZ, agg="avg", cols=X.cpu().numpy().T, x_shape=(len_X, *self.shape), padding=self.padding, stride=self.stride)
                                 ).to(X.device)
+        return col2i
     
     def i2col(self, X):
         i2col = torch.FloatTensor(
                                     im2col(X.reshape(len(X), *self.shape).cpu().numpy(), BSZ=self.BSZ, padding=self.padding, stride=self.stride).T
                                 ).to(X.device)
+
         return i2col
-        print("TODO: Local contrast normalization")
-        return i2col/i2col.std(1, keepdims=True)
 
     
-    def transform(self, X, exponent=1, agg="mean", act=lambda x : x):
+    def transform(self, X, exponent=1, agg="mean", act=lambda x : x, resample=False):
         """
         Transforms the data matrix X spatially.
 
@@ -78,7 +75,7 @@ class SpatialICA(HugeICA):
         """ 
         if not torch.is_tensor(X):
             device = next(self.parameters()).device
-            return self.transform(torch.FloatTensor(X).to(device), exponent=exponent, agg=agg, act=act).cpu().detach().numpy()
+            return self.transform(torch.FloatTensor(X).to(device), exponent=exponent, agg=agg, act=act, resample=resample).cpu().detach().numpy()
         n_components = self.n_components
         if isinstance(self.net, Net2d):
             device = next(self.parameters()).device
@@ -98,6 +95,12 @@ class SpatialICA(HugeICA):
             s = act(s)
             s = s[im2colOrder(n_images, n_patches)]         # reorder such that patches of same image are consecutive
             s = s.reshape(-1, n_tiles, n_components)
+        if resample == "with_replacement":
+            # This breaks the temporal dependencies and takes a random subset of patches
+            s = torch.stack([ s[i, torch.randint(n_tiles, (n_tiles,)), :] for i in range(len(s)) ])
+        if resample == "without_replacement":
+            # This breaks the temporal dependencies and takes a random subset of patches
+            s = torch.stack([ s[i, torch.randperm(n_tiles), :] for i in range(len(s)) ])
         s = self.agg(s, agg)
         return s
 
@@ -191,8 +194,6 @@ class SpatialICA(HugeICA):
         patches, z, z_ = self.predict(X)
         X_ = self.col2i(patches, len(X)).reshape(len(X), -1)
         return X_
-        
-
    
     def elbo(self, X, p_z=Loss.ExpNormalized, sigma_eps=1e-5,  sample_scale=0.):
         """
@@ -227,13 +228,16 @@ class SpatialICA(HugeICA):
         #print(X.shape, "distributions", X_.flatten().mean())
         #log_px_z = log_px_z.log_prob(X_.flatten()).reshape(len(X), -1)
         #print(X.shape, "col2i")
-        log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1)
-        log_px_z = self.col2i(log_px_z, n)
-        #print(X.shape, "log_px_z")
-        log_px_z = log_px_z.reshape(n, -1).sum(1)
+        
+        # log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1)
+        # log_px_z = self.col2i(log_px_z, n)
+        # log_px_z = log_px_z.reshape(n, -1).sum(1)
+        images = self.col2i(X, n) 
+        images_rec = self.col2i(X_, n)
+        log_px_z = 0.5*(-np.log(2*np.pi) - ((images.flatten() - images_rec.flatten())**2))
+        log_px_z = log_px_z.reshape(len(images), -1).sum(1) # sum over pixels
 
         log_pz_z = p_z(z_)
-        # print(X.shape, "log_pz_z")
         log_pz_z = log_pz_z.reshape(n, -1).sum(1) # sum over timesteps
         
         return log_px_z + log_pz_z + H_qz_q
@@ -309,10 +313,10 @@ class SpatialICA(HugeICA):
 
         X, X_, z = X.cpu(), X_.cpu(), z.cpu()
 
-        sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
-        log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1)
-        log_px_z = self.col2i(log_px_z, n)
-        log_px_z = log_px_z.reshape(n, -1).sum(1)
+        images = self.col2i(X, n) 
+        images_rec = self.col2i(X_, n)
+        log_px_z = 0.5*(-np.log(2*np.pi) - ((images.flatten() - images_rec.flatten())**2))
+        log_px_z = log_px_z.reshape(len(images), -1).sum(1) # sum over pixels
         
         return -log_px_z
 
@@ -365,29 +369,33 @@ class SpatialICA(HugeICA):
         Returns
             S (B*n_tiles, k) : The k components of the patches. 
 
-        Note:
-            The returned components patches are not stored consecutive. 
-            S = S[im2colOrder(n_images, n_patches)]
-            For consecutive order.
         """
         if not torch.is_tensor(X):
             return self.forward(torch.FloatTensor(X))
-        X_ = self.i2col(X)
+        if X.dim() == 2:
+            X_ = self.i2col(X)
+            X_ = X_[im2colOrder(len(X), len(X_))] # reordering
         return super().transform(X_)
     
-    def fit(self, X, epochs, X_val, lr=1e-3, *args, **kwargs):
+    def fit(self, X, epochs, X_val, lr=1e-3, resample=False, *args, **kwargs):
         if not torch.is_tensor(X):
-            return self.fit(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), *args, **kwargs)
+            return self.fit(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), resample, *args, **kwargs)
         X_ = self.i2col(X)         # patching
         X_val_ = self.i2col(X_val) # patching
         X_ = X_[im2colOrder(len(X), len(X_))] # reordering
         X_val_ = X_val_[im2colOrder(len(X_val), len(X_val_))] # reordering
+        if resample == "with_replacement":
+            # This breaks the temporal dependencies and takes a random subset of patches
+            X_ = X_.view(len(X), self.n_tiles, -1)
+            X_ = torch.stack([ X_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X)) ])
+            
+            X_val_ = X_val_.view(len(X_val_), self.n_tiles, -1)
+            X_val_ = torch.stack([ X_val_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X_val_)) ])
 
         super().fit(X_, epochs, X_val_, *args, **kwargs)
 
 
     def fit2d(self, X, epochs, X_val, lr=1e-3, *args, **kwargs):
-        #raise NotImplementedError("This one is not implemented yet.")
         if not torch.is_tensor(X):
             return self.fit2d(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), *args, **kwargs)
 

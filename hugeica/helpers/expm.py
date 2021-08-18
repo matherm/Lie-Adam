@@ -44,5 +44,5 @@ def expm_caley(A):
     return torch.inverse(I - theta) @ (I + theta)
 
 
-# expm = expm_class.apply
-expm = expm_caley
+expm = expm_class.apply
+#expm = expm_caley

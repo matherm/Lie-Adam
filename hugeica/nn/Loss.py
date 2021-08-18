@@ -124,16 +124,15 @@ class Loss():
     def Logprob(S, G_fun=None):
         return G_fun(S).mean(1).mean(0)
 
+
     @staticmethod
-    def NegentropyLoss(S, G_fun):
-        """
-        https://ieeexplore.ieee.org/abstract/document/5226546
-        """
+    def Negentropy(S, G_fun):
         if not torch.is_tensor(S):
-            return Loss.NegentropyLoss(torch.from_numpy(S), G_fun).numpy()
+            return Loss.Negentropy(torch.from_numpy(S), G_fun).numpy()
 
         S = S - S.mean(0)
         S = S / S.std(0)
+        S[np.isnan(S.detach().cpu().numpy())] = 0
         Loss.GAMMA = Loss.GAMMA.to(S.device)
         G = Loss.GAMMA.repeat((1, S.shape[1]))
 
@@ -141,6 +140,14 @@ class Loss():
         E_G_g = G_fun(G).mean(0) 
  
         J_z = (E_G_z - E_G_g)**2
+        return J_z
+
+    @staticmethod
+    def NegentropyLoss(S, G_fun):
+        """
+        https://ieeexplore.ieee.org/abstract/document/5226546
+        """
+        J_z = Loss.Negentropy(S, G_fun)
         
         return -J_z.sum()
 
