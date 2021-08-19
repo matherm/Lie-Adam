@@ -339,7 +339,7 @@ class SFA():
                             model.fit(X_, epochs, bs=bs, lr=lr, logging=logging)
                             for nor in norm:
                                 auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in ["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality"]]
-                                bpd_field = auc_lhd, auc_avg_patch = bpd = 0
+                                bpd_field = auc_lhd = auc_avg_patch = bpd = 0
                                 if compute_bpd:
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
