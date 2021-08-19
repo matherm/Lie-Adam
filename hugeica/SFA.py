@@ -338,11 +338,13 @@ class SFA():
                                             inter_image_diffs=inter_image_diffs)
                             model.fit(X_, epochs, bs=bs, lr=lr, logging=logging)
                             for nor in norm:
-                                auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in ["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]]
-                                bpd_field = auc_lhd = bpd = 0
+                                auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in ["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality"]]
+                                bpd_field = auc_lhd, auc_avg_patch = bpd = 0
                                 if compute_bpd:
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
+                                    auc_avg_patch = agg(model, "avg_patch_reconstruct", X_in_, X_out_, nor)
+                                auc += auc_avg_patch
                                 spread = model.change_variance_.max() - model.change_variance_.min()
                                 k_min  = model.change_variance_.min()
                                 k_max  = model.change_variance_.max()
