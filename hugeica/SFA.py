@@ -344,7 +344,7 @@ class SFA():
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
                                     auc_avg_patch = agg(model, "avg_patch_reconstruct", X_in_, X_out_, nor)
-                                auc += auc_avg_patch
+                                auc += [auc_avg_patch]
                                 spread = model.change_variance_.max() - model.change_variance_.min()
                                 k_min  = model.change_variance_.min()
                                 k_max  = model.change_variance_.max()
