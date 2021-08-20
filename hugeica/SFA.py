@@ -204,6 +204,7 @@ class SFA():
         ####################################
         # Transform
         ###################################
+        print("# Compute information measures")
         S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         S_diff = (S.reshape(-1, self.model.n_tiles, self.reduced_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
         S_add = (S.reshape(-1, self.model.n_tiles, self.reduced_components) + np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
@@ -229,12 +230,11 @@ class SFA():
         self.CE_gaussian        = -Loss.Gaussian(torch.FloatTensor(S_diff)).sum(1).mean(0).numpy()
         self.d_ruzsa            =  np.abs(self.H_neighbor - self.H_signal_white)
         self.d_ruzsa_add        =  np.abs(entropy_gaussian(sfa_add.cov) - self.H_signal_white) if self.extended_entropies else -1
-        self.d_ruzsa_add_        = np.abs(entropy_gaussian(sfa_add.cov) - self.H_signal_white) if self.extended_entropies else -1
+        self.d_ruzsa_output     =  np.abs(self.H_output - self.H_signal_white)
         self.d_ruzsa_           =  self.H_neighbor - self.H_signal_white
         self.KL                 =  self.CE_gaussian - self.H_neighbor
         self.H_max              =  self.H_receptive/(self.shape[0]*np.prod(self.BSZ)) + (self.H_neighbor/self.reduced_components) 
-
-        
+          
         
         ####################################
         # Decorrelation
@@ -250,7 +250,10 @@ class SFA():
 
 
     @staticmethod
-    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, compute_bpd=True, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True):
+    def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), 
+                                bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, 
+                                compute_bpd=True, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
+                                aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
 
         if epochs > 1:
             ica = True
@@ -338,13 +341,12 @@ class SFA():
                                             inter_image_diffs=inter_image_diffs)
                             model.fit(X_, epochs, bs=bs, lr=lr, logging=logging)
                             for nor in norm:
-                                auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in ["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality"]]
-                                bpd_field = auc_lhd = auc_avg_patch = bpd = 0
+                                print("# Compute AUCs")
+                                auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in aucs]
+                                bpd_field = auc_lhd = bpd = 0
                                 if compute_bpd:
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
-                                    auc_avg_patch = agg(model, "avg_patch_reconstruct", X_in_, X_out_, nor)
-                                auc += [auc_avg_patch]
                                 spread = model.change_variance_.max() - model.change_variance_.min()
                                 k_min  = model.change_variance_.min()
                                 k_max  = model.change_variance_.max()
@@ -385,7 +387,7 @@ class SFA():
         hyp = pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", "remove_components", \
                                     "k_min", "k_max", "k", "kurt", "bpd", "bpd_field", \
                                         "H_receptive", "H_signal", "H_signal_white", "H_neighbor", "H_signal_sparse", "H_signal_gauss", "H_joint", "H_cond", "CE_gaussian", \
-                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "H_max", "lhd" ,"var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"])       
+                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "H_max", "lhd"] + aucs)       
         
         return hyp
          
