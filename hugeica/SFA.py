@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 def negH(s, avg=False, reduce=True):
     if reduce:
         if avg:
-            return -Loss.NegentropyLoss(torch.FloatTensor(s), G_fun=Loss.Logcosh).detach().numpy() / s.shape[1]
+            return -Loss.NegentropyLoss(torch.FloatTensor(s), G_fun=Loss.Logcosh, bootstraps=20).detach().numpy() / s.shape[1]
         else:
-            return -Loss.NegentropyLoss(torch.FloatTensor(s), G_fun=Loss.Logcosh).detach().numpy()
+            return -Loss.NegentropyLoss(torch.FloatTensor(s), G_fun=Loss.Logcosh, bootstraps=20).detach().numpy()
     else:
-        return Loss.Negentropy(torch.FloatTensor(s), G_fun=Loss.Logcosh).detach().numpy()
+        return Loss.NegentropyResample(torch.FloatTensor(s), G_fun=Loss.Logcosh, bootstraps=20).detach().numpy()
 
 class SFA():
 
@@ -253,7 +253,7 @@ class SFA():
     def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), 
                                 bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, 
                                 compute_bpd=True, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
-                                aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
+                                extended_entropies=False, aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
 
         if epochs > 1:
             ica = True
@@ -338,7 +338,8 @@ class SFA():
                                             max_components=max_components,
                                             mode=mode,
                                             use_conv=use_conv,
-                                            inter_image_diffs=inter_image_diffs)
+                                            inter_image_diffs=inter_image_diffs,
+                                            extended_entropies=extended_entropies)
                             model.fit(X_, epochs, bs=bs, lr=lr, logging=logging)
                             for nor in norm:
                                 print("# Compute AUCs")

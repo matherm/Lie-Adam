@@ -6,7 +6,7 @@ from ..helpers.mutual_information import mutual_information
 
 class Loss():
 
-    GAMMA = torch.randn(2000).view(-1,1)
+    GAMMA = torch.randn(50000).view(-1,1)
 
     @staticmethod
     def NNICA(x):
@@ -143,11 +143,35 @@ class Loss():
         return J_z
 
     @staticmethod
-    def NegentropyLoss(S, G_fun):
+    def NegentropyResample(S, G_fun, bootstraps=20):
+        if not torch.is_tensor(S):
+            return Loss.NegentropyResample(torch.from_numpy(S), G_fun).numpy()
+        
+        S = S - S.mean(0)
+        S = S / S.std(0)
+        S[np.isnan(S.detach().cpu().numpy())] = 0
+        
+        J_z = []
+        for i in range(bootstraps):
+        
+            G = torch.randn(size=S.shape).to(S.device)
+            E_G_g = G_fun(G).mean(0) 
+            E_G_z = G_fun(S).mean(0) 
+
+            J_z.append( (E_G_z - E_G_g)**2 )
+
+        return torch.stack(J_z).mean(0)
+
+
+    @staticmethod
+    def NegentropyLoss(S, G_fun, bootstraps=0):
         """
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
-        J_z = Loss.Negentropy(S, G_fun)
+        if bootstraps > 0:
+            J_z = Loss.NegentropyResample(S, G_fun, bootstraps)
+        else:
+            J_z = Loss.Negentropy(S, G_fun)
         
         return -J_z.sum()
 
