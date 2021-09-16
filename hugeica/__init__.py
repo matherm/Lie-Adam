@@ -4,6 +4,7 @@ from .optim import *
 from .nn import *
 from .HugeICA import *
 from .SpatialHugeICA import *
+from .ConvSpatialHugeICA import *
 from .SFA import *
 from .__version__ import __version__
 

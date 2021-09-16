@@ -9,7 +9,7 @@ from hugeica import *
 
 class Net(nn.Module):
 
-    def __init__(self, n_input, n_components, whiten=True, ica=True, whitening_strategy="batch", dataset_size=-1, derivative="lie", fun=Loss.Logcosh):
+    def __init__(self, n_input, n_components, whiten=True, init_eye=True, whitening_strategy="batch", dataset_size=-1, derivative="lie", fun=Loss.Logcosh):
         super().__init__()
         
         if whiten:
@@ -30,7 +30,7 @@ class Net(nn.Module):
         else:
             ValueError(f"derivative={derivative} not understood.")
 
-        if not ica:
+        if init_eye:
             self.ica.weight.data = torch.eye(self.ica.weight.data.shape[0])
         self.layers = nn.Sequential(self.whiten, self.ica)
     
@@ -42,7 +42,7 @@ class HugeICA(nn.Module):
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, ica=True, loss="negexp", optimistic_whitening_rate=1.0, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False, bs=100000):
+    def __init__(self, n_components, whiten=True, init_eye=True, loss="negexp", optimistic_whitening_rate=1.0, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False, bs=100000):
         super().__init__()
 
         if whitening_strategy not in ["GHA", "batch"]:
@@ -59,7 +59,7 @@ class HugeICA(nn.Module):
         self.optimistic_whitening_rate = optimistic_whitening_rate
         self.derivative = derivative
         self.whiten = whiten
-        self.ica = ica
+        self.init_eye = init_eye
         self.whitening_strategy = whitening_strategy
         self.net = None
         self.optimitzer = optimizer
@@ -400,8 +400,7 @@ class HugeICA(nn.Module):
             if torch.is_tensor(validation_loader):
                 tensors = validation_loader, torch.empty(len(validation_loader))
             if not isinstance(validation_loader, torch.utils.data.DataLoader):   
-                validation_loader = FastTensorDataLoader(tensors, batch_size=np.min([bs, len(dataloader)]))
-
+                validation_loader = FastTensorDataLoader(tensors, batch_size=np.min([bs, len(validation_loader)]))
         return dataloader, validation_loader
 
     def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs=1000, logging=-1):
@@ -412,7 +411,7 @@ class HugeICA(nn.Module):
 
         if self.net is None: 
             self.d = X.shape[1]
-            self.net = Net(self.d, self.n_components, self.whiten, self.ica, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+            self.net = Net(self.d, self.n_components, self.whiten, self.init_eye, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
             self.reset(lr)
           
         print(f"# Fit HugeICA(({dataset_size}, {self.d}, {self.n_components}), device='{self.device}')")
@@ -452,10 +451,10 @@ class HugeICA(nn.Module):
                    loss.cpu().item()/len(validation_loader), # 1
                    Loss.FrobCov(S_),                         # 2
                    Loss.Kurtosis(S_),                        # 3
-                  -Loss.NegentropyLoss(S, self.G),           # 4    
+                  -Loss.NegentropyLoss(S, Loss.Logcosh),           # 4    
                    time.time() - t_start,                    # 5
                    Loss.grad_norm(grad_old, self.grad()),    # 6
-                   Loss.Logprob(S, self.G) if not isinstance(self.loss, nn.Module) else 0., # 7
+                   Loss.Logprob(S, Loss.Logcosh) if not isinstance(self.loss, nn.Module) else 0., # 7
                    train_loss)                               # 8
             print(f"Ep.{ep:3} - {train_loss:.4f} - validation (loss/white/kurt/mi/logp): {loss[1]:.4f} / {loss[2]:.2f} / {loss[3].mean():.2f} / {loss[4]:.4f} / {loss[7]:.4f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)

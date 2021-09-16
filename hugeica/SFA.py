@@ -18,13 +18,12 @@ def negH(s, avg=False, reduce=True):
 
 class SFA():
 
-    def  __init__(self, n_components = 30, remove_components = 0, ica=False, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000,  use_conv=False, inter_image_diffs=True, extended_entropies=False):
-        assert mode in ["slow", "fast", "sparse", "none", "slow_null", "random"]
+    def  __init__(self, n_components = 30, remove_components = 0, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000,  use_conv=False, inter_image_diffs=True, extended_entropies=False):
+        assert mode in ["slow", "fast", "sparse", "none", "slow_null", "random", "ta", "ica"]
 
         self.n_components = n_components
         self.max_components = max_components
         self.remove_components = remove_components
-        self.ica = ica
         self.shape = shape
         self.use_conv = use_conv
         self.inter_image_diffs = inter_image_diffs
@@ -44,34 +43,50 @@ class SFA():
             self.n_components = int(self.dim * self.n_components)
 
     
-    def init_model(self, n_components, bs, max_components):
+    def init_model(self, n_components, bs, max_components, conv=False):
         if n_components == "kaiser" or n_components == "mle" or n_components == "q90" or n_components == "q95":
             n_components = self.dim
 
         if n_components > np.min([max_components, bs]):
             print(f"Warning: n_components={n_components} > np.min([max_components={max_components},bs={bs}]). Setting n_components={np.min([max_components, bs])}")
             n_components =  np.min([max_components, bs])
-            
-        model = SpatialICA(shape=self.shape, 
-                           BSZ=self.BSZ, 
-                           padding=0, 
-                           stride=self.stride, 
-                           n_components=n_components,
-                           loss="negexp", 
-                           optimistic_whitening_rate=1000, 
-                           whitening_strategy="batch", 
-                           reduce_lr=True,
-                           bs=bs,
-                           ica=self.ica)
+
+        if conv:     
+            model = ConvSpatialICA(shape=self.shape, 
+                            BSZ=self.BSZ, 
+                            padding=0, 
+                            stride=self.stride, 
+                            n_components=n_components,
+                            loss= (lambda x : -Loss.Exp(x.view(-1, self.n_tiles, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
+                            optimistic_whitening_rate=1000, 
+                            whitening_strategy="batch", 
+                            reduce_lr=True,
+                            bs=bs,
+                            init_eye=False if self.mode == "ica" else True)
+        else:
+            model = SpatialICA(shape=self.shape, 
+                            BSZ=self.BSZ, 
+                            padding=0, 
+                            stride=self.stride, 
+                            n_components=n_components,
+                            loss=  (lambda x : -Loss.Exp(x.view(-1, self.n_tiles, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
+                            optimistic_whitening_rate=1000, 
+                            whitening_strategy="batch", 
+                            reduce_lr=True,
+                            bs=bs,
+                            init_eye=False if self.mode == "ica" else True)
         return model
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2, resample=False):
         ####################################
-        # Input validation
+        # Input Validation
         ###################################
-        if not self.ica and epochs > 1:
-            print("Warning: Setting epochs to 1, as self.ica is False")
-            epochs = 1
+
+        if self.mode == "ta":
+            if bs % self.n_tiles > 0:
+                bs_ = bs
+                bs = bs - bs % self.n_tiles
+                print(f"Warning: bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
 
         ####################################
         # TiledICA
@@ -81,10 +96,10 @@ class SFA():
         if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95":
             epochs_ = 1
         if self.use_conv:
-            self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)), self.max_components)
-            self.model.fit2d(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)))
+            self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)), self.max_components, True)
+            self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)))
         else:
-            self.model = self.init_model(self.n_components, bs, self.max_components)
+            self.model = self.init_model(self.n_components, bs, self.max_components, False)
             self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
         self.model.cpu()
         
@@ -197,6 +212,9 @@ class SFA():
             self.model.n_components        = self.reduced_components
             self.T = self.model.net.ica.components_[random_idx[-self.reduced_components:]]
             self.model.net.ica.weight.data = self.T
+        elif self.mode == "none":
+            print("# Update the independent components")
+            self.model.net.ica.weight.data = torch.eye(self.model.n_components).to(self.model.device)
         else:
             self.reduced_components = self.n_components
 
@@ -255,10 +273,6 @@ class SFA():
                                 compute_bpd=True, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
                                 extended_entropies=False, aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
 
-        if epochs > 1:
-            ica = True
-        else:
-            ica = False 
 
         def agg(model, mode, X_in, X_out, ord=norm):
             if mode == "hotelling":
@@ -334,7 +348,6 @@ class SFA():
                                             stride=s, 
                                             n_components=c,
                                             remove_components=r,
-                                            ica=ica,
                                             max_components=max_components,
                                             mode=mode,
                                             use_conv=use_conv,

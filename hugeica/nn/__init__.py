@@ -3,6 +3,7 @@ from .Layer_PCA import *
 from .Layer_GHA import *
 from .Layer_Variance import *
 from .Layer_Nat import *
+from .Layer_TA import *
 from .Parameter import *
 from .Loss import *
 from .Transpose import *

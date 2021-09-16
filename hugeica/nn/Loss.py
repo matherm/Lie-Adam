@@ -3,7 +3,6 @@ import numpy as np
 from torch.nn.functional import relu
 from ..helpers.mutual_information import mutual_information
 
-
 class Loss():
 
     GAMMA = torch.randn(50000).view(-1,1)
