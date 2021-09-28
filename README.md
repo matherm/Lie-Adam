@@ -1,6 +1,6 @@
-# HugeICA
+# Lie-Adam
 
-PyTorch implementation of HugeICA. 
+PyTorch implementation of Lie-Adam. 
 
 ![](./examples/cifar10-components.png)
 
@@ -23,8 +23,7 @@ Implements the following algorithms in Pytorch:
 
 1. For GIT:
 ```
-git clone git@hugeica.git
-python setup.py install|develop
+git clone https://github.com/matherm/Lie-Adam
 ```
 
 2. For PIP
@@ -42,10 +41,3 @@ pytest tests
 ```
 python examples/sklearn_moons.py  
 ```
-
-
-<script>
-alert("hello")
-</script>
-
-
