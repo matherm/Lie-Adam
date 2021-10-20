@@ -45,6 +45,9 @@ class HugeICA(nn.Module):
     def __init__(self, n_components, whiten=True, init_eye=True, loss="negexp", optimistic_whitening_rate=1.0, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False, bs=100000):
         super().__init__()
 
+        if bs < n_components and whiten and whitening_strategy == "batch":
+            raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={n_components}")
+
         if whitening_strategy not in ["GHA", "batch"]:
             raise ValueError(f"Whitening strategy {whitening_strategy} not understood.")
 
@@ -381,9 +384,6 @@ class HugeICA(nn.Module):
         
         if bs == "auto":
             bs = self.n_components
-
-        if bs < self.n_components and self.whiten and self.whitening_strategy == "batch":
-            raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={self.n_components}")
         
         if isinstance(dataloader, np.ndarray):
             tensors =  torch.from_numpy(dataloader) , torch.empty(len(dataloader))
@@ -413,8 +413,8 @@ class HugeICA(nn.Module):
             self.d = X.shape[1]
             self.net = Net(self.d, self.n_components, self.whiten, self.init_eye, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
             self.reset(lr)
-          
-        print(f"# Fit HugeICA(({dataset_size}, {self.d}, {self.n_components}), device='{self.device}')")
+        
+        print(f"# Fit HugeICA(({dataset_size}, {X.shape[1]}, {self.n_components}), device='{self.device}', bs={bs})")
         
         def fit(ep):
             if ep == 0 and logging > 0:

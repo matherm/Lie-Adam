@@ -44,6 +44,10 @@ class SFA():
 
     
     def init_model(self, n_components, bs, max_components, conv=False):
+
+        if conv:
+            bs = bs * self.n_tiles
+
         if n_components == "kaiser" or n_components == "mle" or n_components == "q90" or n_components == "q95":
             n_components = self.dim
 
@@ -82,11 +86,20 @@ class SFA():
         # Input Validation
         ###################################
 
-        if self.mode == "ta":
+        if self.use_conv == True:
             if bs % self.n_tiles > 0:
                 bs_ = bs
                 bs = bs - bs % self.n_tiles
                 print(f"Warning: bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
+            bs = bs // self.n_tiles
+
+        elif self.mode == "ta":
+            if bs % self.n_tiles > 0:
+                bs_ = bs
+                bs = bs - bs % self.n_tiles
+                print(f"Warning: bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
+
+
 
         ####################################
         # TiledICA
@@ -95,12 +108,9 @@ class SFA():
         epochs_ = epochs
         if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95":
             epochs_ = 1
-        if self.use_conv:
-            self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)), self.max_components, True)
-            self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 64, np.inf)))
-        else:
-            self.model = self.init_model(self.n_components, bs, self.max_components, False)
-            self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
+
+        self.model = self.init_model(self.n_components, bs, self.max_components, self.use_conv)
+        self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
         self.model.cpu()
         
         #if not self.ica:
@@ -120,12 +130,8 @@ class SFA():
                 self.n_components = quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.95)
             
             print(f"# Re-Fit SpatialICA({self.n_components}).")
-            if self.use_conv:
-                self.model = self.init_model(self.n_components, int(np.clip(bs/self.n_tiles**0.5, 128, np.inf)), self.max_components)
-                self.model.fit2d(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=int(np.clip(bs/self.n_tiles**0.5, 128, np.inf)))
-            else:
-                self.model = self.init_model(self.n_components, bs, self.max_components)
-                self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
+            self.model = self.init_model(self.n_components, bs, self.max_components, self.use_conv)
+            self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
             self.model.cpu()
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         else:
@@ -155,9 +161,16 @@ class SFA():
         if self.inter_image_diffs == False:
             invalid_diffs = ((np.arange(len(X)) + 1) * self.model.n_tiles) - 1
             S_change_score = np.delete(S_change_score, invalid_diffs, axis=0)
+        
         self.sfa = HugeICA(self.n_components, bs=bs)
-        self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
-        self.change_variance_ = self.sfa.var
+        if self.mode == "slow" or self.mode == "slow_null" or self.mode == "fast":
+            self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
+            self.change_variance_ = self.sfa.var
+            self.sfa_cov = self.sfa.cov
+        else:
+            self.change_variance_ = np.zeros(self.n_components)
+            self.sfa_cov = np.eye(self.n_components)
+
 
         if self.remove_components == "q95":
             self.reduced_components = np.min([quantile_rule(None, eigvals=self.original_explained_variance_, explained_variance=0.95), self.n_components])
@@ -178,15 +191,16 @@ class SFA():
             sfa_add = HugeICA(self.n_components, bs=bs)
             sfa_add.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
         
-        slow_idx = np.argsort(self.sfa.explained_variance_)
         if self.mode == "slow":
             print("# Update the independent components")
+            slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx[:self.reduced_components]]
             self.change_variance_ = self.sfa.explained_variance_[slow_idx[:self.reduced_components]]
             self.model.n_components        = self.reduced_components
             self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
         elif self.mode == "slow_null":
             print("# Update the independent components")
+            slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx]
             self.T[:, self.reduced_components:] = 0.
             self.change_variance_ = self.sfa.explained_variance_[slow_idx]
@@ -195,6 +209,7 @@ class SFA():
             self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
         elif self.mode == "fast":
             print("# Update the independent components")
+            slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx[-self.reduced_components:]]
             self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.reduced_components:]]
             self.model.n_components        = self.reduced_components
@@ -235,7 +250,7 @@ class SFA():
 
         # Compute some Information measures
         self.negH_sum           =  negH(S.mean(1), avg=False)
-        self.H_neighbor         =  entropy_gaussian(self.sfa.cov)
+        self.H_neighbor         =  entropy_gaussian(self.sfa_cov)
         self.var_diff           =  S_diff.reshape(len(S), -1).var(0).mean() # variance of diffs
         self.var                =  S.mean(1).var(0).mean() # variance of output
         self.local_var          =  S.var(1).mean() # variance of output
