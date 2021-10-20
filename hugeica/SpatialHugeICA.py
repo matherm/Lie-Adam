@@ -354,22 +354,24 @@ class SpatialICA(HugeICA):
     def fit(self, X, epochs, X_val, lr=1e-3, resample=False, *args, **kwargs):
         if not torch.is_tensor(X):
             return self.fit(torch.FloatTensor(X), epochs, torch.FloatTensor(X_val), resample, *args, **kwargs)
-
+        
         if self.net is None:
             X_ = self.i2col(X)         # patching
             X_val_ = self.i2col(X_val) # patching
             X_ = X_[im2colOrder(len(X), len(X_))] # reordering
             X_val_ = X_val_[im2colOrder(len(X_val), len(X_val_))] # reordering
+
+            if resample == "with_replacement":
+                # This breaks the temporal dependencies and takes a random subset of patches
+                X_ = X_.view(len(X), self.n_tiles, -1)
+                X_ = torch.stack([ X_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X)) ])
+            
+                X_val_ = X_val_.view(len(X_val_), self.n_tiles, -1)
+                X_val_ = torch.stack([ X_val_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X_val_)) ])
+
         else:
+            # Conv case
             X_ = X
             X_val_ = X_val
             
-        if resample == "with_replacement":
-            # This breaks the temporal dependencies and takes a random subset of patches
-            X_ = X_.view(len(X), self.n_tiles, -1)
-            X_ = torch.stack([ X_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X)) ])
-            
-            X_val_ = X_val_.view(len(X_val_), self.n_tiles, -1)
-            X_val_ = torch.stack([ X_val_[i, torch.randint(self.n_tiles, (self.n_tiles,)), :] for i in range(len(X_val_)) ])
-
         super().fit(X_, epochs, X_val_, *args, **kwargs)
