@@ -5,4 +5,4 @@ fasterica.egg-info/
 **/data/**
 **/build/**
 **/dist/**
-
+**/.ipynb_checkpoints/**
