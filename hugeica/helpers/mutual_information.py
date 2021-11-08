@@ -1,7 +1,9 @@
 '''
 Non-parametric computation of entropy and mutual-information
 
-Adapted by G Varoquaux for code created by R Brette, itself
+Adapted from
+
+G Varoquaux for code created by R Brette, itself
 from several papers (see in the code).
 
 These computations rely on nearest-neighbor statistics
@@ -14,7 +16,7 @@ from scipy.linalg import det
 from numpy import pi
 
 from sklearn.neighbors import NearestNeighbors
-from sklearn.decomposition.pca import _infer_dimension_
+from sklearn.decomposition._pca import _infer_dimension
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPRegressor
 
@@ -55,7 +57,7 @@ def nearest_distances(X, k=1):
 
 
 def mle_rule(eigvals, n_samples):
-    k = _infer_dimension_(eigvals, n_samples, len(eigvals))
+    k = _infer_dimension(eigvals, n_samples, len(eigvals))
     return k
 
 def quantile_rule(C, eigvals=[], explained_variance=0.95):

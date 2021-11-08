@@ -1,5 +1,7 @@
+LICENSE
 README.md
 setup.py
+hugeica/ConvSpatialHugeICA.py
 hugeica/HugeICA.py
 hugeica/SFA.py
 hugeica/SpatialHugeICA.py
@@ -21,6 +23,7 @@ hugeica/helpers/expm64.py
 hugeica/helpers/im2col.py
 hugeica/helpers/math_tricks.py
 hugeica/helpers/mutual_information.py
+hugeica/helpers/regression.py
 hugeica/helpers/stats.py
 hugeica/helpers/visualization.py
 hugeica/nn/AR.py
@@ -30,10 +33,13 @@ hugeica/nn/Layer_GHA.py
 hugeica/nn/Layer_Nat.py
 hugeica/nn/Layer_PCA.py
 hugeica/nn/Layer_SO.py
+hugeica/nn/Layer_TA.py
 hugeica/nn/Layer_Variance.py
 hugeica/nn/Loss.py
 hugeica/nn/Parameter.py
 hugeica/nn/ParametricLoss.py
+hugeica/nn/Reshape.py
+hugeica/nn/Transpose.py
 hugeica/nn/__init__.py
 hugeica/optim/Adam_Lie.py
 hugeica/optim/LBFGS_Lie.py

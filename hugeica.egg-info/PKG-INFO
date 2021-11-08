@@ -1,4 +1,4 @@
-Metadata-Version: 1.2
+Metadata-Version: 2.1
 Name: hugeica
 Version: 0.8.0
 Summary: HugeICA
@@ -6,7 +6,6 @@ Home-page: UNKNOWN
 Author: Copyright (C) 2020 Matthias Hermann & Matthias O. Franz, IOS Konstanz
 Author-email: Matthias.Hermann@htwg-konstanz.de
 License: BSD 3-Clause
-Description: UNKNOWN
 Keywords: ICA
 Platform: OS Independent
 Classifier: Development Status :: Beta
@@ -14,3 +13,7 @@ Classifier: License :: BSD 3-Clause
 Classifier: Operating System :: Linux
 Classifier: Programming Language :: Python
 Requires-Python: >3.6
+License-File: LICENSE
+
+UNKNOWN
+

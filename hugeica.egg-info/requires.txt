@@ -4,5 +4,4 @@ imageio
 scikit-learn
 torch
 tqdm
-torchvision
 matplotlib
