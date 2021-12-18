@@ -18,11 +18,12 @@ def negH(s, avg=False, reduce=True):
 
 class SFA():
 
-    def  __init__(self, n_components = 30, remove_components = 0, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000,  use_conv=False, inter_image_diffs=True, extended_entropies=False):
-        assert mode in ["slow", "fast", "sparse", "none", "slow_null", "random", "ta", "ica"]
+    def  __init__(self, n_components = 30, remove_components = 0, shape=(3,32,32), BSZ=(16, 16), stride=4, mode="none", temporal_decorr=False, act=lambda x : x,  max_components=100000000,  min_components=5, use_conv=False, inter_image_diffs=True, extended_entropies=False):
+        assert mode in ["slow", "fast", "sparse", "none", "slow_null", "random", "4ta", "ta", "ica"]
 
         self.n_components = n_components
         self.max_components = max_components
+        self.min_components = min_components
         self.remove_components = remove_components
         self.shape = shape
         self.use_conv = use_conv
@@ -35,6 +36,7 @@ class SFA():
         self.act = act
         self.dim = self.shape[0]*np.prod(self.BSZ)
         self.extended_entropies = extended_entropies
+        self.ta_mult = 4 if mode == "4ta" else 1
 
         if type(self.n_components) == int and self.n_components == -1:
             self.n_components = self.dim
@@ -61,7 +63,7 @@ class SFA():
                             padding=0, 
                             stride=self.stride, 
                             n_components=n_components,
-                            loss= (lambda x : -Loss.Exp(x.view(-1, self.n_tiles, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
+                            loss= (lambda x : -Loss.Exp(x.view(-1, self.n_tiles * self.ta_mult, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
                             optimistic_whitening_rate=1000, 
                             whitening_strategy="batch", 
                             reduce_lr=True,
@@ -73,7 +75,7 @@ class SFA():
                             padding=0, 
                             stride=self.stride, 
                             n_components=n_components,
-                            loss=  (lambda x : -Loss.Exp(x.view(-1, self.n_tiles, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
+                            loss=  (lambda x : -Loss.Exp(x.view(-1, self.n_tiles * self.ta_mult, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
                             optimistic_whitening_rate=1000, 
                             whitening_strategy="batch", 
                             reduce_lr=True,
@@ -125,13 +127,13 @@ class SFA():
             elif self.n_components == "mle":
                 self.n_components = mle_rule(self.model.explained_variance_, len(X))
             elif self.n_components == "q90":
-                self.n_components = quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.90)
+                self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.90), self.min_components])
             elif self.n_components == "q95":
-                self.n_components = quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.95)
+                self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.95), self.min_components])
             
             print(f"# Re-Fit SpatialICA({self.n_components}).")
             self.model = self.init_model(self.n_components, bs, self.max_components, self.use_conv)
-            self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
+            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
             self.model.cpu()
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         else:
@@ -237,7 +239,7 @@ class SFA():
         ####################################
         # Transform
         ###################################
-        print("# Compute information measures")
+        print("# Compute Information Measures")
         S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         S_diff = (S.reshape(-1, self.model.n_tiles, self.reduced_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
         S_add = (S.reshape(-1, self.model.n_tiles, self.reduced_components) + np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
@@ -284,8 +286,8 @@ class SFA():
 
     @staticmethod
     def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), 
-                                bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, 
-                                compute_bpd=True, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
+                                bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, min_components=10, 
+                                compute_bpd=False, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
                                 extended_entropies=False, aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
 
 
@@ -364,6 +366,7 @@ class SFA():
                                             n_components=c,
                                             remove_components=r,
                                             max_components=max_components,
+                                            min_components=min_components,
                                             mode=mode,
                                             use_conv=use_conv,
                                             inter_image_diffs=inter_image_diffs,
@@ -376,11 +379,13 @@ class SFA():
                                 if compute_bpd:
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
+                                print("# Compute Spread")
                                 spread = model.change_variance_.max() - model.change_variance_.min()
                                 k_min  = model.change_variance_.min()
                                 k_max  = model.change_variance_.max()
-                                k      = model.change_variance_.max()/model.change_variance_.min()
+                                k      = model.change_variance_.max()/(model.change_variance_.min() + 1e-8)
                                 kurt   = model.kurt
+                                print("# Compute Entropy")
                                 H_receptive  = model.H_receptive
                                 H_neighbor   = model.H_neighbor
                                 CE_gaussian  = model.CE_gaussian

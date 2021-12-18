@@ -87,7 +87,17 @@ class SpatialICA(HugeICA):
         super().set_residuals_std(X)
 
     def agg(self, s, agg):
-        if agg == "mean":
+        """
+        s (B, T, k)
+        """
+        B, T, k = s.shape
+        if "maxMean" in agg:
+            interval = int(agg.split("maxMean")[1])
+            s = s.reshape(B, T, k).mean(1) # average over patches of the four consecutive images
+            s = s.reshape(-1, interval, k).max(1)[0]
+        elif agg == "4mean":
+            s = s.reshape(-1, T * 4, k).mean(1) # average over patches of the four consecutive images
+        elif agg == "mean":
             s = s.mean(1) # average over patches of the same image
         elif agg == "diff":
             s = sum_of_diff(s, 1) # average over patches of the same image

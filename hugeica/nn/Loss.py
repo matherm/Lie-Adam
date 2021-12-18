@@ -131,7 +131,7 @@ class Loss():
 
         S = S - S.mean(0)
         S = S / S.std(0)
-        S[np.isnan(S.detach().cpu().numpy())] = 0
+        S[torch.isnan(S)] = 0
         Loss.GAMMA = Loss.GAMMA.to(S.device)
         G = Loss.GAMMA.repeat((1, S.shape[1]))
 
@@ -148,7 +148,7 @@ class Loss():
         
         S = S - S.mean(0)
         S = S / S.std(0)
-        S[np.isnan(S.detach().cpu().numpy())] = 0
+        S[torch.isnan(S)] = 0
         
         J_z = []
         for i in range(bootstraps):
