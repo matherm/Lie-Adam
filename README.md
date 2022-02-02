@@ -2,7 +2,7 @@
 
 PyTorch implementation of Lie-Adam. 
 
-![](./examples/cifar10-components.png)
+![](./examples/imagenet-components.png)
 
 Implements the following algorithms in Pytorch:
 - Batch PCA with optimistic whitening
@@ -13,10 +13,8 @@ Implements the following algorithms in Pytorch:
 - Improved Lie Group ICA
     - Plumbley, M. D. (2007, April). Geometry and manifolds for independent component analysis. In 2007 IEEE International Conference on Acoustics, Speech and Signal Processing-ICASSP'07 (Vol. 4, pp. IV-1397). 
     - See http://www.eecs.qmul.ac.uk/~markp/2007/Plumbley07-icassp.pdf
-- Kraskov's Mutual Information
-    - Kraskov A, Stogbauer H, Grassberger P. (2004). Estimating mutual information. Phys Rev E 69(6 Pt 2):066138.
 - Generalized Hebbian Algorithm
-    - Erkki Oja. Simplified neuron model as a principal component analyzer
+    - Erkki Oja. Simplified neuron model as a principal component analyzer.
 
 
 ### Installation
