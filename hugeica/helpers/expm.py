@@ -1,3 +1,10 @@
+"""
+Adaptation of expm and expm_frechet in numpy/scipy for PyTorch
+
+Copyright (c) 2019 Lezcano
+https://github.com/Lezcano/expm/tree/master/pytorch_expm
+"""
+
 import torch
 import numpy as np
 from .expm32 import expm32
@@ -44,5 +51,5 @@ def expm_caley(A):
     return torch.inverse(I - theta) @ (I + theta)
 
 
-# expm = expm_class.apply
+#expm = expm_class.apply
 expm = expm_caley

@@ -129,22 +129,41 @@ class Loss():
         """
         https://ieeexplore.ieee.org/abstract/document/5226546
         """
+        if not torch.is_tensor(S):
+            return Loss.NegentropyLoss(torch.from_numpy(S), G_fun).numpy()
+
         S = S - S.mean(0)
         S = S / S.std(0)
-        Loss.GAMMA = Loss.GAMMA.to(S.device)     
+        Loss.GAMMA = Loss.GAMMA.to(S.device)
+        G = Loss.GAMMA.repeat((1, S.shape[1]))
+
         E_G_z = G_fun(S).mean(0) 
-        E_G_g = G_fun(Loss.GAMMA.repeat((1, S.shape[1]))).mean(0) 
+        E_G_g = G_fun(G).mean(0) 
  
         J_z = (E_G_z - E_G_g)**2
         
         return -J_z.sum()
 
     @staticmethod
-    def NegentropyLossNumpy(S, G_fun=None):
-        if G_fun == None:
-            G_fun = Loss.Logcosh
-        return Loss.NegentropyLoss(torch.from_numpy(S), G_fun).numpy()
+    def NegentropyLossUnscaled(S, G_fun):
+        """
+        https://ieeexplore.ieee.org/abstract/document/5226546
+        """
+        if not torch.is_tensor(S):
+            return Loss.NegentropyLoss(torch.from_numpy(S), G_fun).numpy()
 
+        S = S - S.mean(0)
+        Loss.GAMMA = Loss.GAMMA.to(S.device)     
+        G = Loss.GAMMA.repeat((1, S.shape[1]))
+        G = G * S.std(0)
+        
+        E_G_z = G_fun(S).mean(0) 
+        E_G_g = G_fun(G).mean(0) 
+ 
+        J_z = (E_G_z - E_G_g)**2
+        
+        return -J_z.sum()
+    
     @staticmethod
     def grad_norm(grad_old, grad_new):
         return torch.norm(grad_old - grad_new).cpu().detach().item()

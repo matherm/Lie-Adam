@@ -6,6 +6,7 @@ import scipy
 import collections
 from tqdm import tqdm
 from hugeica import *
+print("abc")
 
 class Net(nn.Module):
 

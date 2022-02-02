@@ -1,5 +1,8 @@
 """
-Adaptation of expm and expm_frechet in numpy for torch
+Adaptation of expm and expm_frechet in numpy/scipy for PyTorch
+
+Copyright (c) 2019 Lezcano
+https://github.com/Lezcano/expm/tree/master/pytorch_expm
 """
 
 #
