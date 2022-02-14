@@ -1,6 +1,39 @@
 import torch
 import numpy as np
 
+def scatter_mean(batch, vals, unique=None):
+    """
+    #scatter_mean(np.array([0, 0, 0, 0, 0, 2, 2, 2]), np.array([[2, 2, 2, 2, 4, 3, 3, 3],[2, 2, 2, 2, 4, 3, 3, 3]]).T, unique=4)
+    batch = [0, 0, 0, 0, 0, 1, 1, 1]
+    vals =  [2, 2, 2, 2, 3, 3, 3, 4]
+    vals2 = [1, 1, 1, 1, 1, 1, 1, 1]
+
+    target = np.zeros(2)
+    np.add.at(target, batch, vals)
+
+    target2 = np.zeros(2)
+    np.add.at(target2, batch, vals2)
+
+    target/target2 = array([2.2       , 3.33333333])
+    """
+    if unique is None:
+        n = len(np.unique(batch))
+    else:
+        n = unique
+    d = vals.shape[1]
+    
+    sums = np.zeros((n, d))
+    np.add.at(sums, batch, vals)
+
+    m = np.zeros((n))
+    np.add.at(m, batch, np.ones(len(batch)))
+    m = m.reshape(-1, 1)
+    
+    avg = np.divide(sums, m, out=np.zeros_like(sums), where=m!=0)
+
+    return avg
+
+
 def sum_of_diff(X, axis=1):
     if torch.is_tensor(X):
         return torch.FloatTensor(sum_of_diff(X.cpu().detach().numpy(), axis)).to(X.device)

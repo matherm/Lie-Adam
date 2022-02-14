@@ -1,7 +1,7 @@
 '''
 Non-parametric computation of entropy and mutual-information
 
-Adapted from
+Adapted from https://gist.github.com/GaelVaroquaux
 
 G Varoquaux for code created by R Brette, itself
 from several papers (see in the code).

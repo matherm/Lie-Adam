@@ -31,7 +31,7 @@ class F_SO_Linear(Function):
         # Gradient w.r.t. input
         # grad_input = grad_output.mm(weight) # gradient is not needed in previous layers
         # Gradient w.r.t. weights
-        grad_weight = grad_output.T.mm(inpt)
+        grad_weight = grad_output.T.mm(inpt) 
         grad_lie = lie_bracket(weight, grad_weight)
         return grad_input, grad_lie
 
@@ -43,7 +43,7 @@ class SO_Layer(nn.Module):
         self.reset_()
 
     def reset_(self):
-        self.weight.data = torch.qr(torch.distributions.Normal(0,0.01).sample(self.weight.data.shape))[0]
+        self.weight.data = torch.linalg.qr(torch.distributions.Normal(0,0.01).sample(self.weight.data.shape))[0]
 
     @property
     def components_(self):
@@ -87,7 +87,7 @@ class SO_Layer2d(nn.Module):
         self.reset_()
 
     def reset_(self):
-        self.weight.data = torch.qr(torch.distributions.Normal(0,0.01).sample(self.weight.data.shape))[0]
+        self.weight.data = torch.linalg.qr(torch.distributions.Normal(0,0.01).sample(self.weight.data.shape))[0]
 
     @property
     def components_(self):

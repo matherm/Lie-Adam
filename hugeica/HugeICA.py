@@ -244,7 +244,7 @@ class HugeICA(nn.Module):
             return 0.
         grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.grad is not None and w.requires_grad]
         if len(grad) == 0:
-            return 0.
+            return torch.Tensor([0.]).to(self.device)
         return torch.cat(grad).flatten().clone()
 
     def transform(self, X):
@@ -309,8 +309,7 @@ class HugeICA(nn.Module):
         C_inv  = np.linalg.pinv(C)  # d x d
         
         # Malahanobis
-        M = X @ C_inv @ X.T
-        M = np.diag(M).flatten()
+        M = ( X * ( C_inv @ X.T ).T ).sum(1)
         
         return -0.5*M - 0.5*d*np.log(2*np.pi) - 0.5*logdet(C)
 
@@ -355,8 +354,6 @@ class HugeICA(nn.Module):
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
             H_qz_q = 0.
 
-        # sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
-        # sigma_per_dim = torch.ones_like(X.flatten()) # add minimal variance
         # log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
         log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1).sum(1)
         log_pz_z = p_z(z_).sum(1)
@@ -403,18 +400,22 @@ class HugeICA(nn.Module):
                 validation_loader = FastTensorDataLoader(tensors, batch_size=np.min([bs, len(validation_loader)]))
         return dataloader, validation_loader
 
+    def _create_network(self, dataset_size):
+        self.net = Net(self.d, self.n_components, self.whiten, self.init_eye, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+
     def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs=1000, logging=-1):
 
         dataloader, validation_loader = self._prepare_input(X, X_val, bs)
-        dataset_size = len(dataloader) * dataloader.batch_size
+        dataset_size = X.shape[0]
         t_start = time.time()
 
         if self.net is None: 
             self.d = X.shape[1]
-            self.net = Net(self.d, self.n_components, self.whiten, self.init_eye, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
-            self.reset(lr)
+            self._create_network(dataset_size)
+        self.reset(lr)
         
-        print(f"# Fit HugeICA(({dataset_size}, {X.shape[1]}, {self.n_components}), device='{self.device}', bs={bs})")
+        if logging > -10:
+            print(f"# Fit HugeICA(({dataset_size}, {X.shape[1]}, {self.n_components}), device='{self.device}', bs={bs})")
         
         def fit(ep):
             if ep == 0 and logging > 0:
@@ -464,14 +465,6 @@ class HugeICA(nn.Module):
             train_loss = fit(ep)
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
-        
-        # if self.whiten:
-        #     try:
-        #         self.set_residuals_std(X)
-        #     except:
-        #         print("Residuals could not be computed.")
-        # else:
-        #     print("Residuals cannot be computed when whiten=False")
         
         # if self.history[-1][6] > 1e-3:
         #    print(f"Training did non converge. Gradient norm was", self.history[-1][6])

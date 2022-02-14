@@ -59,11 +59,13 @@ class F_Batch_PCA(Function):
         # Gradient w.r.t. weights # Gradient w.r.t. bias
         n_components_ = weight.shape[0]
         n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
-
+        
         if n_samples_seen_ < ds_size and updating > 0.:
             new_weight, new_S, new_explained_var, new_mean_, new_var_, = batch_pca_update(inpt, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples, n_samples_seen_)
+            n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
             return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, None, None
         else:
+            n_samples_seen_, ds_size, n_samples = ups_ds_size[0], ups_ds_size[1], len(inpt)
             return grad_input, weight.clone(), S.clone(), explained_var.clone(), mean_.clone(), var_.clone(), None, None
   
 class Batch_PCA_Layer(nn.Module):
@@ -111,15 +113,6 @@ class F_Batch_PCA_2d(Function):
         # rollout the weights
         kernel = weight.view(n_components, C, filter_size, filter_size).clone()
         ctx.save_for_backward(inpt, weight, kernel, stride, S, explained_var, mean_, var_, bias, ups_ds_size, updating) # save unfolded without mean correction for backward
-        # begin ugly unfold -> mean correction -> fold
-        # inpt = F.unfold(inpt, filter_size, dilation=1, padding=0, stride=(stride, stride)) # (B, C*F*F, n_tiles)
-        # inpt = inpt.transpose(1,2).contiguous()
-        # inpt = inpt.view(-1, C*filter_size*filter_size)
-        # inpt = inpt - mean_ # mean correction
-        # inpt = inpt.view(B, -1, C*filter_size*filter_size)
-        # inpt = inpt.transpose(1, 2).contiguous()
-        # inpt = F.fold(inpt, (H, W), filter_size, dilation=1, padding=0, stride=(stride, stride)) # (B, F*F, n_tiles)
-        # end
         outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
         outpt =  (outpt - bias.view(1, -1, 1, 1)) / torch.sqrt(explained_var).view(1, -1, 1, 1)
         return outpt
@@ -145,14 +138,6 @@ class F_Batch_PCA_2d(Function):
             new_weight, new_S, new_explained_var, new_mean_, new_var_ = batch_pca_update(inpt_, weight, S, mean_, var_, ups_ds_size, updating, n_components_, n_samples * T, n_samples_seen_)
             new_bias = (new_weight @ new_mean_.T).T
 
-            # kernel = new_weight.view(n_components_, C, filter_size, filter_size).clone()
-            # outpt = F.conv2d(inpt, kernel, stride=stride.item()) # (B, n_components, H, W)
-            # outpt = outpt.transpose(1,2).transpose(2,3).contiguous().view(-1, n_components_)
-            # 
-            # new_bias, _, _ =  incremental_mean_and_var(
-            #                                             outpt, last_mean=bias, last_variance=bias,
-            #                                             last_sample_count=n_samples_seen_)
-    
             return grad_input, new_weight, new_S, new_explained_var, new_mean_, new_var_, new_bias, None, None, None, None, None
         else:
             return grad_input, weight.clone(), S.clone(), explained_var.clone(), mean_.clone(), var_.clone(), bias, None, None, None, None, None

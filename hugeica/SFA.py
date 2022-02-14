@@ -1,4 +1,5 @@
 import pandas as pd
+import warnings
 import torch
 from itertools import product
 from sklearn.decomposition import PCA
@@ -6,7 +7,26 @@ from sklearn.metrics import roc_auc_score
 from hugeica import *
 import matplotlib.pyplot as plt
 
-# Compute some Information measures
+def preprocess(X, X_in, X_out, norm_contrast=True, DC=True, channels=None):
+    X_, _ = dequantize(X) 
+    if norm_contrast:
+        X_, _ = to_norm_contrast(X_, DC=DC, channels=channels)
+    # mean, std = X_.mean(0), X_.std(0)
+    mean, std = np.zeros(X_.mean(0).shape), X_.std()
+    X_, _ = scale(X_, mean, std)
+
+    X_in_, _ = dequantize(X_in)
+    if norm_contrast:
+        X_in_, _ = to_norm_contrast(X_in_, DC=DC, channels=channels)
+    X_in_, _ = scale(X_in_, mean, std)
+
+    X_out_, _ = dequantize(X_out)
+    if norm_contrast:
+        X_out_, _ = to_norm_contrast(X_out_, DC=DC, channels=channels)
+    X_out_, _ = scale(X_out_, mean, std)
+    
+    return X_, X_in_, X_out_, mean, std
+
 def negH(s, avg=False, reduce=True):
     if reduce:
         if avg:
@@ -45,16 +65,16 @@ class SFA():
             self.n_components = int(self.dim * self.n_components)
 
     
-    def init_model(self, n_components, bs, max_components, conv=False):
+    def init_model(self, n_components, bs, max_components, conv=False, whiten=True):
 
         if conv:
             bs = bs * self.n_tiles
 
-        if n_components == "kaiser" or n_components == "mle" or n_components == "q90" or n_components == "q95":
+        if n_components == "kaiser" or n_components == "mle" or n_components == "q90" or n_components == "q95"  or n_components == "q99" or n_components == "q999" or n_components == "q9999" or n_components == "q01" or n_components == "q05" or n_components == "q10":
             n_components = self.dim
 
         if n_components > np.min([max_components, bs]):
-            print(f"Warning: n_components={n_components} > np.min([max_components={max_components},bs={bs}]). Setting n_components={np.min([max_components, bs])}")
+            warnings.warn(f"n_components={n_components} > np.min([max_components={max_components},bs={bs}]). Setting n_components={np.min([max_components, bs])}")
             n_components =  np.min([max_components, bs])
 
         if conv:     
@@ -64,11 +84,12 @@ class SFA():
                             stride=self.stride, 
                             n_components=n_components,
                             loss= (lambda x : -Loss.Exp(x.view(-1, self.n_tiles * self.ta_mult, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
-                            optimistic_whitening_rate=1000, 
+                            optimistic_whitening_rate=1.0, 
                             whitening_strategy="batch", 
                             reduce_lr=True,
                             bs=bs,
-                            init_eye=False if self.mode == "ica" else True)
+                            init_eye=False if self.mode == "ica" else True,
+                            whiten=whiten)
         else:
             model = SpatialICA(shape=self.shape, 
                             BSZ=self.BSZ, 
@@ -76,11 +97,12 @@ class SFA():
                             stride=self.stride, 
                             n_components=n_components,
                             loss=  (lambda x : -Loss.Exp(x.view(-1, self.n_tiles * self.ta_mult, x.size(1)).mean(1))) if self.mode == "ta" else "negexp", 
-                            optimistic_whitening_rate=1000, 
+                            optimistic_whitening_rate=1.0, 
                             whitening_strategy="batch", 
                             reduce_lr=True,
                             bs=bs,
-                            init_eye=False if self.mode == "ica" else True)
+                            init_eye=False if self.mode == "ica" else True,
+                            whiten=whiten)
         return model
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2, resample=False):
@@ -92,35 +114,41 @@ class SFA():
             if bs % self.n_tiles > 0:
                 bs_ = bs
                 bs = bs - bs % self.n_tiles
-                print(f"Warning: bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
+                bs = np.max([bs , 1])
+                warnings.warn(f"bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
             bs = bs // self.n_tiles
+            bs = np.max([bs , 1])
+            self.max_components = np.min([self.n_tiles * bs, self.dim, self.max_components ])
 
         elif self.mode == "ta":
             if bs % self.n_tiles > 0:
                 bs_ = bs
                 bs = bs - bs % self.n_tiles
-                print(f"Warning: bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
+                bs = np.max([bs , 1])
+                warnings.warn(f"bs={bs_} is not a multiple of n_tiles={self.n_tiles}. Setting bs={bs}")
+            self.max_components = np.min([ len(X) * self.n_tiles, bs, self.dim, self.max_components ])
 
-
+        self.min_components = np.min([self.min_components, self.max_components])
+        
+        if self.n_components == "max":
+            self.n_components = self.max_components
 
         ####################################
         # TiledICA
         ###################################
-        print(f"# Fit SpatialICA({self.n_components}).")
+        if logging > -10:
+            print(f"# Fit SpatialICA({self.n_components}).")
         epochs_ = epochs
-        if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95":
+        if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95" or self.n_components == "q99" or self.n_components == "q999" or self.n_components == "q9999" or self.n_components == "q01" or self.n_components == "q05" or self.n_components == "q10":
             epochs_ = 1
 
         self.model = self.init_model(self.n_components, bs, self.max_components, self.use_conv)
         self.model.fit(X, epochs_, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
-        self.model.cpu()
         
-        #if not self.ica:
-            #self.model.net.ica.weight.data = torch.eye(self.model.net.ica.weight.data.shape[0]).to(self.model.device)   
         ####################################
         # Transform
         ###################################
-        if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95":
+        if self.n_components == "kaiser" or self.n_components == "mle" or self.n_components == "q90" or self.n_components == "q95" or self.n_components == "q99" or self.n_components == "q999" or self.n_components == "q9999":
             self.original_explained_variance_ = self.model.explained_variance_
             if self.n_components == "kaiser":
                 self.n_components = kaiser_rule(None, eigvals=self.model.explained_variance_)  
@@ -130,20 +158,50 @@ class SFA():
                 self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.90), self.min_components])
             elif self.n_components == "q95":
                 self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.95), self.min_components])
+            elif self.n_components == "q99":
+                self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.99), self.min_components])
+            elif self.n_components == "q999":
+                self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.999), self.min_components])
+            elif self.n_components == "q9999":
+                self.n_components = np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.9999), self.min_components])
             
-            print(f"# Re-Fit SpatialICA({self.n_components}).")
+            if logging > -10:
+                print(f"# Re-Fit SpatialICA({self.n_components}).")
             self.model = self.init_model(self.n_components, bs, self.max_components, self.use_conv)
             self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
-            self.model.cpu()
+            S = self.model.transform(np.asarray(X), agg="none", act=self.act)
+        elif self.n_components == "q01" or self.n_components == "q05" or self.n_components == "q10":
+            # Negative PCA
+            if self.n_components == "q01":
+                self.n_components = self.max_components - np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.99), self.min_components])
+            if self.n_components == "q05":
+                self.n_components = self.max_components - np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.95), self.min_components])
+            if self.n_components == "q10":
+                self.n_components = self.max_components - np.max([quantile_rule(None, eigvals=self.model.explained_variance_, explained_variance=0.90), self.min_components])
+
+            whiten_layer = self.model.net.whiten
+            self.model.n_components = self.n_components            
+            self.model.net.whiten.n_components = self.n_components
+            self.model.net.whiten.weight.data = whiten_layer.weight.data[-self.n_components:]
+            self.model.net.whiten.weight.grad = whiten_layer.weight.grad[-self.n_components:]
+            self.model.net.whiten.var_expl.data = whiten_layer.var_expl.data[-self.n_components:]
+            self.model.net.whiten.var_expl.grad = whiten_layer.var_expl.grad[-self.n_components:]
+            self.model.net.ica.weight.data = torch.eye(self.n_components).to(self.model.device)
+            self.model.net.ica.weight.grad = torch.eye(self.n_components).to(self.model.device)
+            self.model.net.whiten.updating = 0*self.model.net.whiten.updating
+            if hasattr(self.model.net.whiten, "bias"):
+                self.model.net.whiten.bias.data = whiten_layer.bias.data[-self.n_components:]
+            self.model.fit(X, epochs, X_val=X[:100], logging=logging, lr=lr, bs=bs, resample=resample)
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         else:
             self.n_components = self.model.n_components
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         
+        self.model.cpu()
         # Compute some Information measures
-        print(f"# Compute ICA metrics.")
+        # print(f"# Compute ICA metrics.")
         if self.dim > 100*100*3:
-            print(f"Warning: Not computing cov(dim={self.dim}).")
+            warnings.warn(f"Not computing cov(dim={self.dim}).")
             self.H_receptive       =  np.nan
             self.H_signal          =  np.nan
         else:
@@ -157,15 +215,16 @@ class SFA():
         # SFA / ICA
         ####################################
         S = S.reshape(-1, self.n_components)        
-        print(f"# Fit SFA({self.n_components}).")
+        if logging > -10:
+            print(f"# Fit SFA({self.n_components}).")
         S_change_score = (S.reshape(-1, self.model.n_tiles, self.n_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.n_components), axis=1, shift=1))
         S_change_score = S_change_score.reshape(len(S), -1)
         if self.inter_image_diffs == False:
             invalid_diffs = ((np.arange(len(X)) + 1) * self.model.n_tiles) - 1
             S_change_score = np.delete(S_change_score, invalid_diffs, axis=0)
         
-        self.sfa = HugeICA(self.n_components, bs=bs)
         if self.mode == "slow" or self.mode == "slow_null" or self.mode == "fast":
+            self.sfa = HugeICA(self.n_components, bs=bs)
             self.sfa.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
             self.change_variance_ = self.sfa.var
             self.sfa_cov = self.sfa.cov
@@ -194,14 +253,16 @@ class SFA():
             sfa_add.fit(S_change_score, 1, X_val=S_change_score[:100], logging=logging, lr=1e-2, bs=bs)
         
         if self.mode == "slow":
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx[:self.reduced_components]]
             self.change_variance_ = self.sfa.explained_variance_[slow_idx[:self.reduced_components]]
             self.model.n_components        = self.reduced_components
             self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
         elif self.mode == "slow_null":
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx]
             self.T[:, self.reduced_components:] = 0.
@@ -210,7 +271,8 @@ class SFA():
             self.reduced_components =  self.model.n_components
             self.model.net.ica.weight.data = (self.model.net.ica.components_.T @ torch.from_numpy(self.T).to(self.model.device)).T
         elif self.mode == "fast":
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             slow_idx = np.argsort(self.sfa.explained_variance_)
             self.T = self.sfa.components[:, slow_idx[-self.reduced_components:]]
             self.change_variance_ = self.sfa.explained_variance_[slow_idx[-self.reduced_components:]]
@@ -219,18 +281,21 @@ class SFA():
         elif self.mode == "sparse":
             S = self.model.transform(np.asarray(X), agg="none", act=self.act)
             sparse_idx = np.argsort(negH(S.reshape(-1, S.shape[2]), avg=False, reduce=False))
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             self.model.n_components        = self.reduced_components
             self.T = self.model.net.ica.components_[sparse_idx[-self.reduced_components:]]
             self.model.net.ica.weight.data = self.T
         elif self.mode == "random":
             random_idx = np.random.permutation(self.n_components)
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             self.model.n_components        = self.reduced_components
             self.T = self.model.net.ica.components_[random_idx[-self.reduced_components:]]
             self.model.net.ica.weight.data = self.T
         elif self.mode == "none":
-            print("# Update the independent components")
+            if logging > -10:
+                print("# Update the independent components")
             self.model.net.ica.weight.data = torch.eye(self.model.n_components).to(self.model.device)
         else:
             self.reduced_components = self.n_components
@@ -239,7 +304,7 @@ class SFA():
         ####################################
         # Transform
         ###################################
-        print("# Compute Information Measures")
+        # print("# Compute Information Measures")
         S = self.model.transform(np.asarray(X), agg="none", act=self.act)
         S_diff = (S.reshape(-1, self.model.n_tiles, self.reduced_components) - np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
         S_add = (S.reshape(-1, self.model.n_tiles, self.reduced_components) + np.roll(S.reshape(-1, self.model.n_tiles, self.reduced_components), axis=1, shift=1))
@@ -288,7 +353,7 @@ class SFA():
     def hyperparameter_search(X, X_in, X_out, patch_size=[8, 16], n_components=[8, 16], stride=[2, 4], shape=(3,32,32), 
                                 bs=10000, lr=1e-2, epochs=1, norm=[1], remove_components=[0], logging=-1, max_components=100000000, min_components=10, 
                                 compute_bpd=False, mode="none", use_conv=False, norm_contrast=True, DC=True, channels=None, inter_image_diffs=True, 
-                                extended_entropies=False, aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct"]):
+                                extended_entropies=False, aucs=["var", "sum", "mean", "hotelling", "martingale", "mean_shift", "typicality", "avg_patch_reconstruct", "avg_reconstruct"], preprocess=preprocess):
 
 
         def agg(model, mode, X_in, X_out, ord=norm):
@@ -312,6 +377,10 @@ class SFA():
                 S_in = model.avg_patch_reconstruct(np.asarray(X_in))
                 S_out = model.avg_patch_reconstruct(np.asarray(X_out))
                 auc = roc_auc_score([0] * len(S_in) + [1] * len(S_out), np.concatenate([S_in, S_out]))
+            elif mode == "avg_reconstruct":
+                S_in = model.avg_reconstruct(np.asarray(X_in))
+                S_out = model.avg_reconstruct(np.asarray(X_out))
+                auc = roc_auc_score([0] * len(S_in) + [1] * len(S_out), np.concatenate([S_in, S_out]))
             else:
                 S_in = model.transform(np.asarray(X_in), agg=mode)
                 S_out = model.transform(np.asarray(X_out), agg=mode)
@@ -330,27 +399,8 @@ class SFA():
             auc = roc_auc_score([0] * len(X_in) + [1] * len(X_out), np.concatenate([ins_lhd, outs_lhd]))
             return auc, ins_lhd.mean()
         
-        def preprocess(X, X_in, X_out):
-            X_, _ = dequantize(X) 
-            if norm_contrast:
-                X_, _ = to_norm_contrast(X_, DC=DC, channels=channels)
-            # mean, std = X_.mean(0), X_.std(0)
-            mean, std = np.zeros(X_.mean(0).shape), X_.std()
-            X_, _ = scale(X_, mean, std)
-
-            X_in_, _ = dequantize(X_in)
-            if norm_contrast:
-                X_in_, _ = to_norm_contrast(X_in_, DC=DC, channels=channels)
-            X_in_, _ = scale(X_in_, mean, std)
-
-            X_out_, _ = dequantize(X_out)
-            if norm_contrast:
-                X_out_, _ = to_norm_contrast(X_out_, DC=DC, channels=channels)
-            X_out_, _ = scale(X_out_, mean, std)
-            
-            return X_, X_in_, X_out_, mean, std
         
-        X_, X_in_, X_out_, mean, std = preprocess(X, X_in, X_out)
+        X_, X_in_, X_out_, mean, std = preprocess(X, X_in, X_out, norm_contrast, DC, channels)
         
         bookkeeping = []
         for p in patch_size:
@@ -373,19 +423,19 @@ class SFA():
                                             extended_entropies=extended_entropies)
                             model.fit(X_, epochs, bs=bs, lr=lr, logging=logging)
                             for nor in norm:
-                                print("# Compute AUCs")
+                                # print("# Compute AUCs")
                                 auc          = [agg(model, mode, X_in_, X_out_, nor) for mode in aucs]
                                 bpd_field = auc_lhd = bpd = 0
                                 if compute_bpd:
                                     bpd_field    = bpd_pca_elbo_receptive(model.model, X_in, mean, std).mean()
                                     auc_lhd, bpd = lhd(model, X_in, X_out, mean, std)
-                                print("# Compute Spread")
+                                # print("# Compute Spread")
                                 spread = model.change_variance_.max() - model.change_variance_.min()
                                 k_min  = model.change_variance_.min()
                                 k_max  = model.change_variance_.max()
                                 k      = model.change_variance_.max()/(model.change_variance_.min() + 1e-8)
                                 kurt   = model.kurt
-                                print("# Compute Entropy")
+                                # print("# Compute Entropy")
                                 H_receptive  = model.H_receptive
                                 H_neighbor   = model.H_neighbor
                                 CE_gaussian  = model.CE_gaussian
@@ -411,7 +461,7 @@ class SFA():
                                 bookkeeping.append([p, s, model.reduced_components, nor, model.remove_components, \
                                     k_min, k_max, k, kurt, bpd, bpd_field, \
                                         H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, H_joint, H_cond, CE_gaussian, \
-                                        var_diff, var_sum, local_var, total_var, H_output, KL, d_ruzsa_add, d_ruzsa, d_ruzsa_, negH_diff, negH_diff_avg, negH_sum, H_max, auc_lhd] + auc )
+                                        var_diff, var_sum, local_var, total_var, H_output, KL, d_ruzsa_add, d_ruzsa, d_ruzsa_, negH_diff, negH_diff_avg, negH_sum, negH_sum/model.reduced_components ,H_max, auc_lhd] + auc )
                         except NotImplementedError:
                             e = sys.exc_info()[0]
                             v = sys.exc_info()[1]
@@ -421,7 +471,7 @@ class SFA():
         hyp = pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", "remove_components", \
                                     "k_min", "k_max", "k", "kurt", "bpd", "bpd_field", \
                                         "H_receptive", "H_signal", "H_signal_white", "H_neighbor", "H_signal_sparse", "H_signal_gauss", "H_joint", "H_cond", "CE_gaussian", \
-                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "H_max", "lhd"] + aucs)       
+                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "negH_sum_avg", "H_max", "lhd"] + aucs)       
         
         return hyp
          
@@ -501,6 +551,16 @@ class SFA():
         mse = mse[im2colOrder(len(X), len(patches))]
         avg_mse = mse.reshape(len(X), self.model.n_tiles).mean(1)
         return avg_mse
+
+    def avg_reconstruct(self, X):
+        patches = self.model.i2col(torch.FloatTensor(X))
+        d = patches.shape[1]
+        patch_reconstructions = self.model.predict(patches)[0]
+        diff = (patches - patch_reconstructions).numpy()
+        diff = diff[im2colOrder(len(X), len(patches))]
+        diff = diff.reshape(len(X), self.model.n_tiles, d).mean(1)
+        mse = np.linalg.norm( diff, axis=1)
+        return mse
 
     def martingale(self, X):
         """

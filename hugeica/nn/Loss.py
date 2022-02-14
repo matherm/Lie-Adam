@@ -196,7 +196,8 @@ class Loss():
     
     @staticmethod
     def grad_norm(grad_old, grad_new):
-        return torch.norm(grad_old - grad_new).cpu().detach().item()
+        numel = np.min([grad_old.numel(), grad_new.numel()])
+        return torch.norm(grad_old[:numel] - grad_new[:numel]).cpu().detach().item()
 
     @staticmethod
     def amari(A, B):

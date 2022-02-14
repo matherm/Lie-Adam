@@ -140,7 +140,7 @@ class BernsteinTransform(nn.Module):
         else:
             return [self.a, self.b, self.alpha, self.beta, BernsteinTransform.ascending(self.coeffs)] 
           
-    def forward(self, y, X):
+    def forward(self, y, X=None):
         """
         Transforms the vector y
         """       
@@ -157,7 +157,7 @@ class BernsteinTransform(nn.Module):
                             + log_abs_dy_  
         return z_,  self._log_abs_det
      
-    def inverse(self, z, X):
+    def inverse(self, z, X=None):
         """
         Inverse transform
         """
@@ -181,7 +181,7 @@ class TransformationFlow(nn.Module):
         self.conditional = conditional   
         
         # bernstein bijector
-        self.bernstein = BernsteinTransform(n=n,conditional=conditional,n_outputs=n_outputs)
+        self.bernstein = BernsteinTransform(n=n,conditional=conditional, n_outputs=n_outputs)
             
     def forward(self, X): 
         return X
@@ -191,8 +191,22 @@ class TransformationFlow(nn.Module):
         Samples y by transforming z ~ N(0,1).
         """
         z = torch.distributions.Normal(0, 1).sample((len(self.bernstein.a), size)).to(self.bernstein.a.device)
-        y = self.bernstein.inverse(z, X)
-        return y.detach() 
+        w = self.bernstein.inverse(z, X)
+        # backward()
+        
+        # w_eps = self.bernstein.inverse(z_eps, X)
+        # z_eps = z + eps
+
+        # w.backward(retain_graph=True) 
+        # z.grad => dw_dz 
+
+        # raise("Second backward..")
+        
+        # dw_dz = abs(w - w_eps / eps)
+        #log_q_likelihood = logp_norm(z) - log dw_dz
+        #logp_w = log_q_likelihood
+
+        return w.detach()#, logp_w
         
     def log_prob(self, X, y):
         """
