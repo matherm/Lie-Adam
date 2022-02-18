@@ -142,7 +142,7 @@ class Loss():
         return J_z
 
     @staticmethod
-    def NegentropyResample(S, G_fun, bootstraps=20):
+    def NegentropyResample(S, G_fun, bootstraps=100):
         if not torch.is_tensor(S):
             return Loss.NegentropyResample(torch.from_numpy(S), G_fun).numpy()
         
@@ -152,7 +152,6 @@ class Loss():
         
         J_z = []
         for i in range(bootstraps):
-        
             G = torch.randn(size=S.shape).to(S.device)
             E_G_g = G_fun(G).mean(0) 
             E_G_z = G_fun(S).mean(0) 

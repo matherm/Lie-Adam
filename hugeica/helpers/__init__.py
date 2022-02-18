@@ -7,3 +7,7 @@ from .im2col import *
 from .stats import *
 from .bpd import *
 from .regression import *
+from .image_utils import *
+from .patch_utils import *
+from .kcenter_greedy import *
+from .sampling_def import *

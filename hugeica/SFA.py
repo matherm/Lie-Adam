@@ -4,8 +4,9 @@ import torch
 from itertools import product
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
-from hugeica import *
 import matplotlib.pyplot as plt
+from hugeica import *
+from hugeica.helpers.patch_utils import *
 
 def preprocess(X, X_in, X_out, norm_contrast=True, DC=True, channels=None):
     X_, _ = dequantize(X) 
@@ -57,6 +58,7 @@ class SFA():
         self.dim = self.shape[0]*np.prod(self.BSZ)
         self.extended_entropies = extended_entropies
         self.ta_mult = 4 if mode == "4ta" else 1
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if type(self.n_components) == int and self.n_components == -1:
             self.n_components = self.dim
@@ -89,7 +91,7 @@ class SFA():
                             reduce_lr=True,
                             bs=bs,
                             init_eye=False if self.mode == "ica" else True,
-                            whiten=whiten)
+                            whiten=whiten).to(self.device)
         else:
             model = SpatialICA(shape=self.shape, 
                             BSZ=self.BSZ, 
@@ -102,7 +104,7 @@ class SFA():
                             reduce_lr=True,
                             bs=bs,
                             init_eye=False if self.mode == "ica" else True,
-                            whiten=whiten)
+                            whiten=whiten).to(self.device)
         return model
     
     def fit(self, X, epochs = 15, bs=10000, logging=-1, lr=1e-2, resample=False):
@@ -313,9 +315,11 @@ class SFA():
         if self.inter_image_diffs == False:
             invalid_diffs = ((np.arange(len(X)) + 1) * self.model.n_tiles) - 1
             S_diff = np.delete(S_diff, invalid_diffs, axis=0)
-
-
+        
+        local_shift             = avg_pool( tiles_to_fmap(S), size=2 ) - compute_local_means(S, size=2)
+        
         # Compute some Information measures
+        self.negH_sum_cluster   = negH(local_shift.reshape(local_shift.shape[0] * local_shift.shape[1], -1), avg=False)
         self.negH_sum           =  negH(S.mean(1), avg=False)
         self.H_neighbor         =  entropy_gaussian(self.sfa_cov)
         self.var_diff           =  S_diff.reshape(len(S), -1).var(0).mean() # variance of diffs
@@ -448,6 +452,7 @@ class SFA():
                                 negH_diff    = model.negH_diff
                                 negH_diff_avg= model.negH_diff_avg
                                 negH_sum     = model.negH_sum
+                                negH_sum_cluster = model.negH_sum_cluster
                                 KL           = model.KL
                                 H_max        = model.H_max
                                 d_ruzsa_add  = model.d_ruzsa_add
@@ -461,7 +466,7 @@ class SFA():
                                 bookkeeping.append([p, s, model.reduced_components, nor, model.remove_components, \
                                     k_min, k_max, k, kurt, bpd, bpd_field, \
                                         H_receptive, H_signal, H_signal_white, H_neighbor, H_signal_sparse, H_signal_gauss, H_joint, H_cond, CE_gaussian, \
-                                        var_diff, var_sum, local_var, total_var, H_output, KL, d_ruzsa_add, d_ruzsa, d_ruzsa_, negH_diff, negH_diff_avg, negH_sum, negH_sum/model.reduced_components ,H_max, auc_lhd] + auc )
+                                        var_diff, var_sum, local_var, total_var, H_output, KL, d_ruzsa_add, d_ruzsa, d_ruzsa_, negH_diff, negH_diff_avg, negH_sum, negH_sum/model.reduced_components , negH_sum_cluster, H_max, auc_lhd] + auc )
                         except NotImplementedError:
                             e = sys.exc_info()[0]
                             v = sys.exc_info()[1]
@@ -471,7 +476,7 @@ class SFA():
         hyp = pd.DataFrame(bookkeeping, columns=["patch_size", "s", "n_components", "nor", "remove_components", \
                                     "k_min", "k_max", "k", "kurt", "bpd", "bpd_field", \
                                         "H_receptive", "H_signal", "H_signal_white", "H_neighbor", "H_signal_sparse", "H_signal_gauss", "H_joint", "H_cond", "CE_gaussian", \
-                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "negH_sum_avg", "H_max", "lhd"] + aucs)       
+                                            "var_diff", "var_sum", "local_var", "total_var", "H_output", "KL", "d_ruzsa_add", "d_ruzsa", "d_ruzsa_", "negH_diff", "negH_diff_avg", "negH_sum", "negH_sum_avg", "negH_sum_cluster", "H_max", "lhd"] + aucs)       
         
         return hyp
          
