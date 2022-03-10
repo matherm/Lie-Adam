@@ -350,28 +350,31 @@ def auc_sources_mean_shift(model, X, X_in, X_out, k=100):
 
 
 def auc_coreset(X, X_in, X_out):
-    
     X = avg_pool(X, 2)
-    X_in = avg_pool(X_in, size=2)
-    X_out = avg_pool(X_out, size=2)
     
     n_components = X.shape[1]
     n_tiles =  X.shape[2] * X.shape[3]
     
     X = X.reshape(len(X), n_components, n_tiles) 
-    X_in = X_in.reshape(len(X_in), n_components, n_tiles) 
-    X_out = X_out.reshape(len(X_out), n_components, n_tiles) 
-    
-    X = X.transpose(0, 2, 1)
-    X_in = X_in.transpose(0, 2, 1)
-    X_out = X_out.transpose(0, 2, 1)
+    X = X.transpose(0, 2, 1).copy().reshape(len(X) * n_tiles, n_components)
     
     selector = kCenterGreedy(X, 0, 0)
     selected_idx = selector.select_batch(model=None, already_selected=[], N=int(X.shape[0]*0.01))
     train_coreset = X[selected_idx]
+    
+    t0 = time.time()
+    X_in = avg_pool(X_in, size=2)
+    X_out = avg_pool(X_out, size=2)
+    
+    X_in = X_in.reshape(len(X_in), n_components, n_tiles) 
+    X_out = X_out.reshape(len(X_out), n_components, n_tiles) 
+    
+    X_in = X_in.transpose(0, 2, 1).copy().reshape(len(X_in) * n_tiles, n_components)
+    X_out = X_out.transpose(0, 2, 1).copy().reshape(len(X_out) * n_tiles, n_components)
         
     scores_valid = patch_core_score_2(train_coreset, X_in, n_tiles, b=10, reweight=False) 
     scores_test = patch_core_score_2(train_coreset, X_out, n_tiles, b=10, reweight=False)
+    t1 = (time.time() - t0)
 
-    return roc_auc_score([0] * len(scores_valid) + [1] * len(scores_test), np.concatenate([scores_valid, scores_test]))        
+    return roc_auc_score([0] * len(scores_valid) + [1] * len(scores_test), np.concatenate([scores_valid, scores_test])), t1      
     
