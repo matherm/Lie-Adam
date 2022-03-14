@@ -7,3 +7,4 @@ from .im2col import *
 from .stats import *
 from .bpd import *
 from .regression import *
+from .image_utils import *

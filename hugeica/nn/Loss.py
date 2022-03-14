@@ -3,10 +3,9 @@ import numpy as np
 from torch.nn.functional import relu
 from ..helpers.mutual_information import mutual_information
 
-
 class Loss():
 
-    GAMMA = torch.randn(2000).view(-1,1)
+    GAMMA = torch.randn(50000).view(-1,1)
 
     @staticmethod
     def NNICA(x):
@@ -124,16 +123,15 @@ class Loss():
     def Logprob(S, G_fun=None):
         return G_fun(S).mean(1).mean(0)
 
+
     @staticmethod
-    def NegentropyLoss(S, G_fun):
-        """
-        https://ieeexplore.ieee.org/abstract/document/5226546
-        """
+    def Negentropy(S, G_fun):
         if not torch.is_tensor(S):
-            return Loss.NegentropyLoss(torch.from_numpy(S), G_fun).numpy()
+            return Loss.Negentropy(torch.from_numpy(S), G_fun).numpy()
 
         S = S - S.mean(0)
         S = S / S.std(0)
+        S[torch.isnan(S)] = 0
         Loss.GAMMA = Loss.GAMMA.to(S.device)
         G = Loss.GAMMA.repeat((1, S.shape[1]))
 
@@ -141,6 +139,37 @@ class Loss():
         E_G_g = G_fun(G).mean(0) 
  
         J_z = (E_G_z - E_G_g)**2
+        return J_z
+
+    @staticmethod
+    def NegentropyResample(S, G_fun, bootstraps=100):
+        if not torch.is_tensor(S):
+            return Loss.NegentropyResample(torch.from_numpy(S), G_fun).numpy()
+        
+        S = S - S.mean(0)
+        S = S / S.std(0)
+        S[torch.isnan(S)] = 0
+        
+        J_z = []
+        for i in range(bootstraps):
+            G = torch.randn(size=S.shape).to(S.device)
+            E_G_g = G_fun(G).mean(0) 
+            E_G_z = G_fun(S).mean(0) 
+
+            J_z.append( (E_G_z - E_G_g)**2 )
+
+        return torch.stack(J_z).mean(0)
+
+
+    @staticmethod
+    def NegentropyLoss(S, G_fun, bootstraps=0):
+        """
+        https://ieeexplore.ieee.org/abstract/document/5226546
+        """
+        if bootstraps > 0:
+            J_z = Loss.NegentropyResample(S, G_fun, bootstraps)
+        else:
+            J_z = Loss.Negentropy(S, G_fun)
         
         return -J_z.sum()
 
@@ -166,7 +195,8 @@ class Loss():
     
     @staticmethod
     def grad_norm(grad_old, grad_new):
-        return torch.norm(grad_old - grad_new).cpu().detach().item()
+        numel = np.min([grad_old.numel(), grad_new.numel()])
+        return torch.norm(grad_old[:numel] - grad_new[:numel]).cpu().detach().item()
 
     @staticmethod
     def amari(A, B):
@@ -176,5 +206,11 @@ class Loss():
 
     @staticmethod
     def mcc(S, S_):
+        """
+        S  (B, n_features)
+        S_ (B, n_features) e.g. S_ = model.layer1(X).transpose(0, 2, 3, 1).reshape(-1, n_features)
+        """
         mcc = np.abs(((S.T/np.linalg.norm(S.T,axis=0)).T @ (S_/np.linalg.norm(S_,axis=0)))).max(1).mean()
         return mcc
+
+

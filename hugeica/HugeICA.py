@@ -6,11 +6,10 @@ import scipy
 import collections
 from tqdm import tqdm
 from hugeica import *
-print("abc")
 
 class Net(nn.Module):
 
-    def __init__(self, n_input, n_components, whiten=True, whitening_strategy="batch", dataset_size=-1, derivative="lie", fun=Loss.Logcosh):
+    def __init__(self, n_input, n_components, whiten=True, init_eye=True, whitening_strategy="batch", dataset_size=-1, derivative="lie", fun=Loss.Logcosh):
         super().__init__()
         
         if whiten:
@@ -18,19 +17,19 @@ class Net(nn.Module):
                 self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
             if whitening_strategy == "GHA":
                 self.whiten = HebbianLayer(n_input, n_components, dataset_size)
+        else:
+                self.whiten = Batch_PCA_Layer(n_input, n_components, dataset_size)
+                self.whiten.compute_updates(False)
                 
         if derivative == "lie":
             self.ica    = SO_Layer(n_components)
-        elif derivative == "relative":
-            self.ica    = Relative_Gradient(n_components, fun)
         else:
             ValueError(f"derivative={derivative} not understood.")
 
-        if whiten:
-            self.layers = nn.Sequential(self.whiten, self.ica)
-        else:
-            self.layers = nn.Sequential(self.ica)
-
+        if init_eye:
+            self.ica.weight.data = torch.eye(self.ica.weight.data.shape[0])
+        self.layers = nn.Sequential(self.whiten, self.ica)
+    
     def forward(self, X):
         return self.layers(X)
         
@@ -39,8 +38,11 @@ class HugeICA(nn.Module):
     """
     tbd.
     """
-    def __init__(self, n_components, whiten=True, loss="negexp", optimistic_whitening_rate=0.5, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False):
+    def __init__(self, n_components, whiten=True, init_eye=True, loss="negexp", optimistic_whitening_rate=1.0, whitening_strategy="batch", derivative="lie", optimizer="adam", reduce_lr=False, bs=100000):
         super().__init__()
+
+        if bs < n_components and whiten and whitening_strategy == "batch":
+            raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={n_components}")
 
         if whitening_strategy not in ["GHA", "batch"]:
             raise ValueError(f"Whitening strategy {whitening_strategy} not understood.")
@@ -56,12 +58,14 @@ class HugeICA(nn.Module):
         self.optimistic_whitening_rate = optimistic_whitening_rate
         self.derivative = derivative
         self.whiten = whiten
+        self.init_eye = init_eye
         self.whitening_strategy = whitening_strategy
         self.net = None
         self.optimitzer = optimizer
         self.optim = None
         self.history = []
-        self._reduce_lr = reduce_lr
+        self.reduce_lr = reduce_lr
+        self.bs = bs
         self.K = torch.ones(n_components)
         if loss == "logcosh":
             self.G = Loss.Logcosh
@@ -111,8 +115,7 @@ class HugeICA(nn.Module):
         else:
             raise ValueError(f"loss={loss} not understood.")
 
-    def reset(self, input_dim, dataset_size, lr=1e-3):
-        self.net = Net(input_dim, self.n_components, self.whiten, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+    def reset(self, lr=1e-3):
         if self.optimitzer == "adam":
             if isinstance(self.G, nn.Module):
                 if self.whiten:
@@ -153,8 +156,8 @@ class HugeICA(nn.Module):
             self.optim = LBFGS_Lie(gens, lr=lr, line_search_fn="strong_wolfe")
         self.to(self.device)
 
-    def reduce_lr(self, by=1e-1):
-        if self.optim is not None and self._reduce_lr:
+    def _reduce_lr(self, by=1e-1):
+        if self.optim is not None and self.reduce_lr:
             for param in self.optim.param_groups:
                 param["lr"] = param["lr"] * by
 
@@ -178,13 +181,17 @@ class HugeICA(nn.Module):
     
     @property
     def unmixing_matrix(self, numpy=True):
-        W_white = self.net.whiten.sphering_matrix 
-        W_rot = self.net.ica.components_.T 
-        return (W_white @ W_rot).cpu().detach().numpy()
+        if not hasattr(self, "unmixing_matrix_"):
+            W_white = self.net.whiten.sphering_matrix 
+            W_rot = self.net.ica.components_.T 
+            self.unmixing_matrix_ = (W_white @ W_rot).cpu().detach().numpy()
+        return self.unmixing_matrix_
     
     @property
     def mixing_matrix(self):
-        return np.linalg.pinv(self.unmixing_matrix)
+        if not hasattr(self, "mixing_matrix_"):
+            self.mixing_matrix_ = np.linalg.pinv(self.unmixing_matrix)
+        return self.mixing_matrix_
 
     @property
     def sphering_matrix(self, numpy=True):
@@ -206,7 +213,9 @@ class HugeICA(nn.Module):
         return self.net.whiten.explained_variance_.cpu().detach().numpy()
 
     @property
-    def cov_sigma(self):
+    def cov(self): 
+        if hasattr(self, "cov_"):
+            return self.cov_
         total_var = self.var.sum()
         explain_var = self.explained_variance_.sum()
         d, k = self.d, self.n_components
@@ -214,12 +223,9 @@ class HugeICA(nn.Module):
             sigma =  1 / (d-k) * (total_var - explain_var) 
         else:
             sigma = 0.
-        return sigma
-
-    @property
-    def cov(self):
         W = self.components
-        return (W @ np.diag(self.explained_variance_) @ W.T) + np.eye(self.d) * self.cov_sigma
+        self.cov_ = (W @ np.diag(self.explained_variance_ - sigma) @ W.T) + np.eye(d) * sigma
+        return self.cov_
 
     @property
     def mu(self):
@@ -234,20 +240,20 @@ class HugeICA(nn.Module):
             return 0.
         grad = [w.grad.flatten().detach() for w in self.net.parameters() if w.grad is not None and w.requires_grad]
         if len(grad) == 0:
-            return 0.
+            return torch.Tensor([0.]).to(self.device)
         return torch.cat(grad).flatten().clone()
 
     def transform(self, X):
         if not torch.is_tensor(X):
             return self.transform(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
-        return self.net(X.to(device))
+        return torch.cat([self.net(X[i:i+self.bs].to(device)) for i in range(0, len(X), self.bs)])
 
     def forward(self, X):
         if not torch.is_tensor(X):
             return self.forward(torch.from_numpy(X)).cpu().detach().numpy()
         device = next(self.parameters()).device
-        return self.net(X.to(device))
+        return torch.cat([self.net(X[i:i+self.bs].to(device)) for i in range(0, len(X), self.bs)])
 
     def predict(self, X, sample_scale=0.):
         """
@@ -259,15 +265,14 @@ class HugeICA(nn.Module):
         A = torch.FloatTensor(self.unmixing_matrix).to(X.device)
         A_ = torch.FloatTensor(self.mixing_matrix).to(X.device)
         mu = torch.FloatTensor(self.mu).to(X.device)
-        z = (X - mu) @ A 
+        z = torch.cat([(X[i:i+self.bs] - mu) @ A for i in range(0, len(X), self.bs)])
         if sample_scale > 0.:
             z_ = torch.distributions.Normal(z.flatten(), sample_scale).sample((1,)).view(z.shape)
-            X_ = (z_ @ A_) + mu
+            X_ = torch.cat([(z_[i:i+self.bs] @ A_) + mu for i in range(0, len(z_), self.bs)])
             return X_, z, z_
         else:
-            X_ = (z @ A_) + mu
+            X_ = torch.cat([(z[i:i+self.bs] @ A_) + mu for i in range(0, len(z), self.bs)])
             return X_, z, z
-
 
     def set_residuals_std(self, X):
         """
@@ -300,8 +305,7 @@ class HugeICA(nn.Module):
         C_inv  = np.linalg.pinv(C)  # d x d
         
         # Malahanobis
-        M = X @ C_inv @ X.T
-        M = M.sum(axis=1).flatten()
+        M = ( X * ( C_inv @ X.T ).T ).sum(1)
         
         return -0.5*M - 0.5*d*np.log(2*np.pi) - 0.5*logdet(C)
 
@@ -340,79 +344,20 @@ class HugeICA(nn.Module):
         d, k = self.d, self.n_components
         if sample_scale > 0.:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
-            H_qz_q = entropy_gaussian(np.eye(k))
+            H_qz_q = entropy_gaussian(dim=k)
             H_qz_q = -torch.distributions.Normal(z.flatten(), 1).log_prob(z_.flatten()).reshape(z.shape).reshape(-1, k).sum(1)
         else:
             X_, z, z_ = self.predict(X, sample_scale=sample_scale)
             H_qz_q = 0.
 
-        sigma_per_dim = self.sigma_residuals.repeat(len(X)) + sigma_eps # add minimal variance
-        log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        # log_px_z = torch.distributions.Normal(X.flatten(), sigma_per_dim).log_prob(X_.flatten()).reshape(len(X), -1).sum(1)
+        log_px_z = 0.5*(-np.log(2*np.pi) - ((X.flatten() - X_.flatten())**2)).reshape(len(X), -1).sum(1)
         log_pz_z = p_z(z_).sum(1)
         elbo = log_px_z + log_pz_z + H_qz_q
-        return -elbo
+        return elbo
 
     def bpd(self, X):
         return -self.elbo(X) / (np.log(2) * self.d)
-
-    def bpd_pca_logit(self, X):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        X, sldj = to_logit(X)
-        self.set_residuals_std(X)
-        elbo_X = self.log_prob(X) + log_abs_inverval + sldj
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_pca_normal(self, X, mean, std):
-        """
-        # log determinant of jacobean
-        # [0 , 255] # -128 --> [-128, 128] --> 0
-        # [-128, 128] # /128 --> [-1, 1] --> np.log(1/128)*dim
-        # np.log(1/128)*dim = dim*(log(1) - log(128)) = -dim*log(128)
-
-        # p(x) = p(f^-1(x))|det df f^-1(x)|
-        # log p(x) = log p(z) + log_det_J # Division is minus
-        """
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
-        if type(np.asarray(std)) == numpy.ndarray:
-            log_abs_scale = -np.log(std).sum()
-        else:
-            log_abs_scale = -np.log(std)*dim
-        X = (X - mean) / std
-        self.set_residuals_std(X)
-        elbo_X = self.log_prob(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_ica_normal(self, X, mean, std):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        log_abs_contrast = -np.log(np.linalg.norm(X, axis=1).flatten())*dim
-        if type(np.asarray(std)) == numpy.ndarray:
-            log_abs_scale = -np.log(std).sum()
-        else:
-            log_abs_scale = -np.log(std)*dim        
-        X = (X - mean) / std
-        self.set_residuals_std(X)
-        elbo_X = self.elbo(X) + log_abs_inverval + log_abs_contrast + log_abs_scale
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
-
-    def bpd_ica_logit(self, X):
-        assert X.min() >= 0 and X.max() <= 1
-        dim = X.shape[1]
-        log_abs_inverval = -np.log(256)*dim
-        X, sldj = to_logit(X)
-        self.set_residuals_std(X)
-        elbo_X = self.elbo(X) + log_abs_inverval + sldj
-        bpd_X = -elbo_X/(np.log(2) * dim)
-        return bpd_X
 
     def score_norm(self, X, ord=0.5):
         if not torch.is_tensor(X):
@@ -432,16 +377,13 @@ class HugeICA(nn.Module):
         
         if bs == "auto":
             bs = self.n_components
-
-        if bs < self.n_components and self.whiten and self.whitening_strategy == "batch":
-            raise ValueError(f"Batch size ({bs}) too small. Expected batch size > n_components={self.n_components}")
         
         if isinstance(dataloader, np.ndarray):
             tensors =  torch.from_numpy(dataloader) , torch.empty(len(dataloader))
         if torch.is_tensor(dataloader):
             tensors = dataloader, torch.empty(len(dataloader))
         if not isinstance(dataloader, torch.utils.data.DataLoader):        
-            dataloader  = FastTensorDataLoader(tensors, batch_size=bs)
+            dataloader  = FastTensorDataLoader(tensors, batch_size=np.min([bs, len(dataloader)]))
         
         if validation_loader is None:
             validation_loader = dataloader
@@ -451,34 +393,36 @@ class HugeICA(nn.Module):
             if torch.is_tensor(validation_loader):
                 tensors = validation_loader, torch.empty(len(validation_loader))
             if not isinstance(validation_loader, torch.utils.data.DataLoader):   
-                validation_loader = FastTensorDataLoader(tensors, batch_size=bs)
-
-        # seems to be the shortest way to find out the data dimension of a dataloader
-        for dat in validation_loader:
-            self.d = dat[0].shape[1]
-            break
+                validation_loader = FastTensorDataLoader(tensors, batch_size=np.min([bs, len(validation_loader)]))
         return dataloader, validation_loader
 
-    def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs="auto", logging=-1):
+    def _create_network(self, dataset_size):
+        self.net = Net(self.d, self.n_components, self.whiten, self.init_eye, self.whitening_strategy, int(dataset_size * self.optimistic_whitening_rate), self.derivative, self.G)
+
+    def fit(self, X, epochs=10, X_val=None, lr=1e-3, bs=1000, logging=-1):
 
         dataloader, validation_loader = self._prepare_input(X, X_val, bs)
-        dataset_size = len(dataloader) * dataloader.batch_size
+        dataset_size = X.shape[0]
         t_start = time.time()
-          
+
+        if self.net is None: 
+            self.d = X.shape[1]
+            self._create_network(dataset_size)
+        self.reset(lr)
+        
+        if logging > -10:
+            print(f"# Fit HugeICA(({dataset_size}, {X.shape[1]}, {self.n_components}), device='{self.device}', bs={bs})")
+        
         def fit(ep):
             if ep == 0 and logging > 0:
                 iterator = zip(dataloader, tqdm(range(len(dataloader)), file=sys.stdout))
             else:
                 iterator = zip(dataloader, range(len(dataloader)))
             if ep == int(0.9 * epochs):
-                self.reduce_lr()
+                self._reduce_lr()
             losses = 0.
             for batch, _ in iterator:
-                data, label = batch[0].to(self.device), None
-                
-                if self.net is None: 
-                    self.reset(self.d, dataset_size, lr)
-                
+                data, label = batch[0].to(self.device), None              
                 self.optim.zero_grad()
                 output = self.net(data)
                 loss = self.loss(output).mean()
@@ -498,15 +442,16 @@ class HugeICA(nn.Module):
                 output = self.net(data).detach()
                 loss += self.loss(output).mean()
                 datalist.append(output)
-            S, S_ = torch.cat(datalist, dim=0), torch.cat(datalist, dim=0).cpu().numpy()
+            S = torch.cat(datalist, dim=0)
+            S_ = S.cpu().numpy()
             loss =(ep,                                       # 0
                    loss.cpu().item()/len(validation_loader), # 1
                    Loss.FrobCov(S_),                         # 2
                    Loss.Kurtosis(S_),                        # 3
-                   Loss.NegentropyLoss(S, self.G),           # 4    
+                  -Loss.NegentropyLoss(S, Loss.Logcosh),           # 4    
                    time.time() - t_start,                    # 5
                    Loss.grad_norm(grad_old, self.grad()),    # 6
-                   Loss.Logprob(S, self.G) if not isinstance(self.loss, nn.Module) else 0., # 7
+                   Loss.Logprob(S, Loss.Logcosh) if not isinstance(self.loss, nn.Module) else 0., # 7
                    train_loss)                               # 8
             print(f"Ep.{ep:3} - {train_loss:.4f} - validation (loss/white/kurt/mi/logp): {loss[1]:.4f} / {loss[2]:.2f} / {loss[3].mean():.2f} / {loss[4]:.4f} / {loss[7]:.4f} (eval took: {time.time() - t0:.1f}s)")
             self.history.append(loss)
@@ -516,11 +461,6 @@ class HugeICA(nn.Module):
             train_loss = fit(ep)
             if ep+1 % logging == 0 and logging > 0 or logging == 1:
                 evaluate(ep, train_loss)
-        
-        if self.whiten:
-            self.set_residuals_std(X)
-        else:
-            print("Residuals cannot be computed when whiten=False")
         
         # if self.history[-1][6] > 1e-3:
         #    print(f"Training did non converge. Gradient norm was", self.history[-1][6])

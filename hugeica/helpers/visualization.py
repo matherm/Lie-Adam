@@ -1,5 +1,27 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import cm
+
+
+def show_images_with_error_bars(X, scores, c=3, bar_width=3):
+    if scores.min() < 0:
+        raise ValueError("Scores must be positive")
+    if scores.min() > 1:
+        raise ValueError("Scores must be less than 1")
+
+    viridis = cm.get_cmap('hot', 100)        
+    scores = (scores * 100).astype(np.int)
+        
+    h = w = int(np.sqrt(X.shape[1]/c))
+    max_num = int(np.sqrt(len(X)))
+    
+    X = X.reshape(len(X), c, h, w).transpose(0, 2, 3, 1)
+    rgb = viridis(scores)[:, :3].reshape(len(X), 1, 1, c) * np.ones((len(X), h, bar_width, c))
+    
+    for i in range(max_num**2):
+        plt.subplot(max_num, max_num, i+1)
+        plt.imshow(np.clip(np.hstack([rgb[i] , X[i]]), 0, 1))
+        plt.axis("off")
 
 def show_filters_color(W, space=1, C=3):
     C, M, N = C, W.shape[0]/C, W.shape[1]
