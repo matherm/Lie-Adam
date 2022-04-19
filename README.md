@@ -2,6 +2,8 @@
 
 PyTorch implementation of Lie-Adam. 
 
+Hermann, M., Umlauf G., & Franz M. O. (2022).  Large-scale independent component analysis by speeding up Lie group techniques. International Conference on Acoustics, Speech, and Signal Processing, ICASSP. BibTeX
+
 ![](./examples/imagenet-components.png)
 
 Implements the following algorithms in Pytorch:
